@@ -91,7 +91,7 @@ def residual_inpaint_mask(
 
     if dilate > 0:
         kernel_size = dilate * 2 + 1
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        kernel: np.ndarray = np.ones((kernel_size, kernel_size), np.uint8)
         mask = cv2.dilate(mask, kernel, iterations=1)
 
     return mask
