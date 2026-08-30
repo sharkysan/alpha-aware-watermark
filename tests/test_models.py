@@ -31,12 +31,12 @@ def test_residual_fraction_handles_zero_support():
     ],
 )
 def test_pipeline_config_validation(field, value, tmp_path: Path):
-    kwargs = dict(
-        input_path=tmp_path/"in.mp4",
-        propainter_dir=tmp_path/"p",
-        output_path=tmp_path/"out.mp4",
-        report_path=tmp_path/"out.csv",
-    )
+    kwargs = {
+        "input_path": tmp_path / "in.mp4",
+        "propainter_dir": tmp_path / "p",
+        "output_path": tmp_path / "out.mp4",
+        "report_path": tmp_path / "out.csv",
+    }
     kwargs[field] = value
     config = PipelineConfig(**kwargs)
     with pytest.raises(ValueError):
