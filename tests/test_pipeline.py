@@ -8,13 +8,13 @@ from watermark_remover.scenes import Scene
 
 
 def _config(tmp_path: Path, **overrides) -> PipelineConfig:
-    values = dict(
-        input_path=tmp_path / "input.mp4",
-        propainter_dir=tmp_path / "ProPainter",
-        output_path=tmp_path / "out.mp4",
-        report_path=tmp_path / "report.csv",
-        temporal_radius=2,
-    )
+    values = {
+        "input_path": tmp_path / "input.mp4",
+        "propainter_dir": tmp_path / "ProPainter",
+        "output_path": tmp_path / "out.mp4",
+        "report_path": tmp_path / "report.csv",
+        "temporal_radius": 2,
+    }
     values.update(overrides)
     return PipelineConfig(**values)
 
