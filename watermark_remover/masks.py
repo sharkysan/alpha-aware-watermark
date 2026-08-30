@@ -15,7 +15,7 @@ def region_mask(
     feather_sigma: float = 1.0,
 ) -> np.ndarray:
     region = region.clamp(frame_width, frame_height)
-    mask = np.zeros((frame_height, frame_width), np.uint8)
+    mask: np.ndarray = np.zeros((frame_height, frame_width), np.uint8)
     x2 = region.x + region.width
     y2 = region.y + region.height
     mask[region.y:y2, region.x:x2] = 255
