@@ -43,6 +43,10 @@ class PipelineConfig:
     mask_dir: Path | None = None
     region: Region | None = None
     temporal_radius: int = 2
+    chunk_size: int = 24
+    scene_threshold: float = 0.62
+    min_scene_length: int = 10
+    motion_compensation: bool = True
     alpha_inpaint_threshold: float = 0.55
     analytic_confidence_min: float = 0.28
     residual_dilate: int = 3
@@ -55,6 +59,12 @@ class PipelineConfig:
     def validate(self) -> None:
         if self.temporal_radius < 0:
             raise ValueError("temporal_radius must be >= 0")
+        if self.chunk_size <= 0:
+            raise ValueError("chunk_size must be > 0")
+        if not -1.0 <= self.scene_threshold <= 1.0:
+            raise ValueError("scene_threshold must be in [-1, 1]")
+        if self.min_scene_length <= 0:
+            raise ValueError("min_scene_length must be > 0")
         if not 0.0 <= self.alpha_inpaint_threshold <= 1.0:
             raise ValueError("alpha_inpaint_threshold must be in [0, 1]")
         if not 0.0 <= self.analytic_confidence_min <= 1.0:

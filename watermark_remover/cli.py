@@ -22,6 +22,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--h", type=int)
 
     parser.add_argument("--temporal-radius", type=int, default=2)
+    parser.add_argument("--chunk-size", type=int, default=24)
+    parser.add_argument("--scene-threshold", type=float, default=0.62)
+    parser.add_argument("--min-scene-length", type=int, default=10)
+    parser.add_argument(
+        "--no-motion-compensation",
+        action="store_true",
+        help="Disable optical-flow alignment before temporal background estimation.",
+    )
     parser.add_argument("--alpha-inpaint", type=float, default=0.55)
     parser.add_argument("--analytic-confidence-min", type=float, default=0.28)
     parser.add_argument("--residual-dilate", type=int, default=3)
@@ -57,6 +65,10 @@ def main() -> None:
         mask_dir=args.mask_dir,
         region=region,
         temporal_radius=args.temporal_radius,
+        chunk_size=args.chunk_size,
+        scene_threshold=args.scene_threshold,
+        min_scene_length=args.min_scene_length,
+        motion_compensation=not args.no_motion_compensation,
         alpha_inpaint_threshold=args.alpha_inpaint,
         analytic_confidence_min=args.analytic_confidence_min,
         residual_dilate=args.residual_dilate,

@@ -19,6 +19,9 @@ def test_residual_fraction_handles_zero_support():
     "field,value",
     [
         ("temporal_radius", -1),
+        ("chunk_size", 0),
+        ("scene_threshold", 1.1),
+        ("min_scene_length", 0),
         ("alpha_inpaint_threshold", 1.1),
         ("analytic_confidence_min", -0.1),
         ("residual_dilate", -1),
