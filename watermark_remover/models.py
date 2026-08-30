@@ -13,7 +13,7 @@ class Region:
     width: int
     height: int
 
-    def clamp(self, frame_width: int, frame_height: int) -> "Region":
+    def clamp(self, frame_width: int, frame_height: int) -> Region:
         x = max(0, min(self.x, frame_width - 1))
         y = max(0, min(self.y, frame_height - 1))
         width = max(1, min(self.width, frame_width - x))
