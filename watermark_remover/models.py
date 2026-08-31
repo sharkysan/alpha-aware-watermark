@@ -55,6 +55,8 @@ class PipelineConfig:
     resize_ratio: float = 1.0
     fp16: bool = False
     save_debug: bool = False
+    resume: bool = False
+    checkpoint_dir: Path | None = None
 
     def validate(self) -> None:
         if self.temporal_radius < 0:
@@ -77,3 +79,5 @@ class PipelineConfig:
             raise ValueError("ref_stride must be > 0")
         if self.resize_ratio <= 0:
             raise ValueError("resize_ratio must be > 0")
+        if self.checkpoint_dir is not None and not self.resume:
+            raise ValueError("checkpoint_dir requires resume=True")
