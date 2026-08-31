@@ -176,6 +176,10 @@ def update_region_selection(
         (255, 255, 255),
         2,
     )
+    status = (
+        f"Selected region: x={region.x}, y={region.y}, "
+        f"width={region.width}, height={region.height}."
+    )
     return (
         current,
         float(region.x),
@@ -184,8 +188,7 @@ def update_region_selection(
         float(region.height),
         True,
         overlay,
-        f"Selected region: x={region.x}, y={region.y}, "
-        f"width={region.width}, height={region.height}.",
+        status,
     )
 
 
