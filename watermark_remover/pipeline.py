@@ -20,6 +20,7 @@ from .mask_providers import DirectoryMaskProvider, MaskProvider, RegionMaskProvi
 from .models import PipelineConfig, QualityMetrics, Region
 from .motion import aligned_temporal_median
 from .ports import CommandRunner
+from .progress import PipelineProgress, ProgressReporter, ignore_progress
 from .reporting import write_quality_report
 from .scenes import Scene, detect_scenes
 from .video import extract_frames, mux_original_audio, probe_video
@@ -33,12 +34,15 @@ class WatermarkRemovalPipeline:
         config: PipelineConfig,
         runner: CommandRunner | None = None,
         mask_provider: MaskProvider | None = None,
+        progress_reporter: ProgressReporter | None = None,
     ) -> None:
         self.config = config
         self.runner = runner or SubprocessCommandRunner()
         self._mask_provider = mask_provider
+        self._progress_reporter = progress_reporter or ignore_progress
 
     def run(self) -> Path:
+        self._report(0.01, "validation", "Validating configuration")
         self.config.validate()
         require_executable("ffmpeg")
 
@@ -46,6 +50,7 @@ class WatermarkRemovalPipeline:
             raise FileNotFoundError(self.config.input_path)
 
         width, height, _, frame_count = probe_video(self.config.input_path)
+        self._report(0.05, "preflight", "Checking disk space and processing prerequisites")
         self._preflight_disk_space(width, height, frame_count)
         mask_provider = self._mask_provider or self._build_mask_provider(width, height)
 
@@ -74,17 +79,21 @@ class WatermarkRemovalPipeline:
             if self.config.save_debug:
                 debug_dir.mkdir()
 
+            self._report(0.10, "extracting", "Extracting source frames")
             frame_paths = extract_frames(
                 self.config.input_path,
                 raw_dir,
                 self.runner,
             )
+            self._report(0.18, "scenes", "Detecting scene boundaries")
             scenes = detect_scenes(
                 frame_paths,
                 threshold=self.config.scene_threshold,
                 min_scene_length=self.config.min_scene_length,
             )
 
+            processed_frames = 0
+            total_frames = max(len(frame_paths), 1)
             for scene in scenes:
                 for chunk in iter_scene_chunks(
                     scene,
@@ -105,12 +114,21 @@ class WatermarkRemovalPipeline:
                             debug_dir=debug_dir,
                         )
                     )
+                    processed_frames += chunk.process_end - chunk.process_start
+                    processing_fraction = min(processed_frames / total_frames, 1.0)
+                    self._report(
+                        0.20 + 0.55 * processing_fraction,
+                        "processing",
+                        f"Processed {min(processed_frames, total_frames)}/{total_frames} frames",
+                    )
 
+            self._report(0.80, "inpainting", "Running ProPainter residual inpainting")
             generated_video = inpainter.inpaint(
                 analytic_dir,
                 residual_dir,
                 inpainted_dir,
             )
+            self._report(0.92, "muxing", "Restoring original audio and writing output video")
             mux_original_audio(
                 generated_video,
                 self.config.input_path,
@@ -118,8 +136,13 @@ class WatermarkRemovalPipeline:
                 self.runner,
             )
 
+        self._report(0.98, "reporting", "Writing quality report")
         write_quality_report(self.config.report_path, metrics)
+        self._report(1.0, "complete", "Processing completed successfully")
         return self.config.output_path
+
+    def _report(self, fraction: float, stage: str, message: str) -> None:
+        self._progress_reporter(PipelineProgress(fraction, stage, message))
 
     def _preflight_disk_space(self, width: int, height: int, frame_count: int) -> None:
         estimate = estimate_disk_space(
