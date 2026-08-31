@@ -13,6 +13,7 @@ from .alpha import (
     residual_inpaint_mask,
     temporal_median,
 )
+from .checkpoints import CheckpointStore
 from .chunks import FrameChunk, iter_scene_chunks
 from .disk import ensure_pipeline_disk_space, estimate_disk_space
 from .infra import ProPainterAdapter, SubprocessCommandRunner, require_executable
@@ -65,19 +66,28 @@ class WatermarkRemovalPipeline:
         inpainter.validate()
 
         metrics: list[QualityMetrics] = []
+        checkpoint_store = CheckpointStore(self.config) if self.config.resume else None
+        if checkpoint_store is not None:
+            checkpoint_store.prepare()
+            self._report(0.07, "checkpoint", "Prepared resumable chunk checkpoints")
 
         with tempfile.TemporaryDirectory(prefix="alpha_wm_") as temp:
             temp_dir = Path(temp)
             raw_dir = temp_dir / "frames"
-            analytic_dir = temp_dir / "analytic"
-            residual_dir = temp_dir / "residual_masks"
             inpainted_dir = temp_dir / "inpainted"
-            debug_dir = temp_dir / "debug"
 
-            analytic_dir.mkdir()
-            residual_dir.mkdir()
-            if self.config.save_debug:
-                debug_dir.mkdir()
+            if checkpoint_store is None:
+                analytic_dir = temp_dir / "analytic"
+                residual_dir = temp_dir / "residual_masks"
+                debug_dir = temp_dir / "debug"
+                analytic_dir.mkdir()
+                residual_dir.mkdir()
+                if self.config.save_debug:
+                    debug_dir.mkdir()
+            else:
+                analytic_dir = checkpoint_store.analytic_dir
+                residual_dir = checkpoint_store.residual_dir
+                debug_dir = checkpoint_store.debug_dir
 
             self._report(0.10, "extracting", "Extracting source frames")
             frame_paths = extract_frames(
@@ -100,9 +110,14 @@ class WatermarkRemovalPipeline:
                     chunk_size=self.config.chunk_size,
                     temporal_radius=self.config.temporal_radius,
                 ):
-                    loaded = self._load_chunk(frame_paths, chunk)
-                    metrics.extend(
-                        self._process_chunk(
+                    chunk_metrics = (
+                        checkpoint_store.load_chunk(chunk)
+                        if checkpoint_store is not None
+                        else None
+                    )
+                    if chunk_metrics is None:
+                        loaded = self._load_chunk(frame_paths, chunk)
+                        chunk_metrics = self._process_chunk(
                             loaded=loaded,
                             scene=scene,
                             chunk=chunk,
@@ -113,7 +128,19 @@ class WatermarkRemovalPipeline:
                             residual_dir=residual_dir,
                             debug_dir=debug_dir,
                         )
-                    )
+                        if checkpoint_store is not None:
+                            checkpoint_store.save_chunk(chunk, chunk_metrics)
+                    else:
+                        self._report(
+                            0.20 + 0.55 * min(processed_frames / total_frames, 1.0),
+                            "resuming",
+                            (
+                                "Reusing checkpointed frames "
+                                f"{chunk.process_start}-{chunk.process_end - 1}"
+                            ),
+                        )
+
+                    metrics.extend(chunk_metrics)
                     processed_frames += chunk.process_end - chunk.process_start
                     processing_fraction = min(processed_frames / total_frames, 1.0)
                     self._report(
@@ -138,6 +165,8 @@ class WatermarkRemovalPipeline:
 
         self._report(0.98, "reporting", "Writing quality report")
         write_quality_report(self.config.report_path, metrics)
+        if checkpoint_store is not None:
+            checkpoint_store.cleanup()
         self._report(1.0, "complete", "Processing completed successfully")
         return self.config.output_path
 
