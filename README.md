@@ -1,18 +1,20 @@
 # Alpha-Aware Temporal Watermark Remover
 
-Version **1.2.0** — a maintainable Python pipeline for removing watermarks from **video you own or have permission to edit**.
+Version **1.3.0** — a maintainable Python pipeline for removing watermarks from **video you own or have permission to edit**.
 
-The project combines alpha-aware inverse compositing, scene-aware temporal analysis, optical-flow alignment, residual AI inpainting with ProPainter, bounded-memory processing, disk-space preflight checks, and an optional local Gradio UI.
+The project combines alpha-aware inverse compositing, scene-aware temporal analysis, optical-flow alignment, residual AI inpainting with ProPainter, bounded-memory processing, disk-space preflight checks, resumable checkpoints, and an optional local Gradio UI.
 
-## What’s new in 1.2.0
+## What’s new in 1.3.0
 
-- **Optional Gradio UI** for upload, preview, region/mask selection, tuning, processing and result download.
-- **Disk-space preflight checks** before frame extraction and inference.
-- **OpenCV 5 support** via `opencv-python>=4.8,<6` while retaining OpenCV 4 compatibility.
-- **Expanded tests** for disk preflight and UI-to-pipeline configuration/delegation.
-- **Updated GitHub Actions dependencies** and the existing CI/security gates remain in place.
+- **Resumable chunk checkpoints** with `--resume` and optional `--checkpoint-dir`.
+- **Interactive watermark-region selection** in the Gradio UI using two preview clicks.
+- **UI preflight readiness panel** for input, ProPainter and disk checks before processing.
+- **Structured progress reporting** surfaced in the Gradio UI.
+- **Filesystem-aware disk preflight** when scratch and output paths share capacity.
+- **Expanded checkpoint, UI, progress and disk-preflight tests**.
+- **Gradio UI overview screenshot** in the README.
 
-See [`RELEASE_NOTES_1.2.0.md`](RELEASE_NOTES_1.2.0.md) for the full release notes.
+See [`RELEASE_NOTES_1.3.0.md`](RELEASE_NOTES_1.3.0.md) for the full release notes.
 
 ## Highlights
 
@@ -21,6 +23,7 @@ See [`RELEASE_NOTES_1.2.0.md`](RELEASE_NOTES_1.2.0.md) for the full release note
 - **Scene-aware processing** — temporal windows stay inside detected visual shots.
 - **Optical-flow alignment** — neighbouring frames are warped before temporal background estimation.
 - **Bounded RAM usage** — processing is chunked instead of loading the full video into memory.
+- **Resumable processing** — completed analytic/residual chunks can be reused after interruptions.
 - **Flexible masks** — per-frame masks or a rectangular fallback region through the `MaskProvider` strategy.
 - **Disk-space preflight** — checks scratch and output capacity before expensive work begins.
 - **Local web UI** — optional Gradio interface built as a thin adapter over the same pipeline used by the CLI.
@@ -129,7 +132,7 @@ Launch the optional UI with:
 watermark-remove-ui
 ```
 
-The UI exposes video upload/preview, ProPainter and output paths, per-frame masks, custom watermark-region coordinates, scene/chunk/temporal controls, motion compensation, alpha/confidence tuning, ProPainter memory controls, FP16/debug options, processed-video preview and quality-report download.
+The UI exposes video upload/preview, interactive two-click watermark-region selection, ProPainter and output paths, per-frame masks, scene/chunk/temporal controls, motion compensation, alpha/confidence tuning, preflight readiness checks, live processing progress, ProPainter memory controls, FP16/debug options, processed-video preview and quality-report download.
 
 <p align="center">
   <img src="docs/images/gradio-ui-overview.png" alt="Alpha-Aware Watermark Remover Gradio UI overview" width="100%">
@@ -159,6 +162,25 @@ watermark-remove input.mp4 \
   --fp16
 ```
 
+Resume a long-running job after interruption:
+
+```bash
+watermark-remove input.mp4 \
+  --propainter ./ProPainter \
+  --resume
+```
+
+Use a custom checkpoint parent directory:
+
+```bash
+watermark-remove input.mp4 \
+  --propainter ./ProPainter \
+  --resume \
+  --checkpoint-dir /fast/local/checkpoints
+```
+
+See [`CHECKPOINTS.md`](CHECKPOINTS.md) for checkpoint lifecycle, invalidation and safety details.
+
 If neither masks nor explicit coordinates are supplied, the pipeline uses its default bottom-right fallback region.
 
 ## Key processing controls
@@ -175,6 +197,7 @@ If neither masks nor explicit coordinates are supplied, the pipeline uses its de
 --ref-stride 14
 --resize-ratio 0.75
 --fp16
+--resume
 ```
 
 Optical-flow alignment is enabled by default; disable it with:
@@ -187,7 +210,17 @@ Optical-flow alignment is enabled by default; disable it with:
 
 Before processing, the pipeline estimates scratch and destination requirements. The estimate accounts for materialized source/intermediate frames, optional debug output and a conservative output reserve.
 
+Shared filesystems are accounted for as shared capacity, preventing scratch and output requirements from being double-counted independently when they consume the same disk.
+
 If capacity is insufficient, the run fails early with required and available space reported in human-readable units instead of failing late after extraction or inference.
+
+## Resumable checkpoints
+
+With `--resume`, completed analytic/residual chunks are persisted beneath the output directory by default and reused when the same input, masks/region and relevant processing settings are detected again.
+
+Checkpoint state is fingerprinted and incomplete outputs are rejected. After a fully successful run, the per-input checkpoint data is removed automatically.
+
+The current implementation checkpoints the analytic/residual recovery phase. Source-frame extraction and the final ProPainter pass are repeated after restart.
 
 ## Mask providers
 
@@ -220,6 +253,7 @@ Each successful run produces a CSV containing frame index, support-mask pixel co
 ```text
 watermark_remover/
 ├── alpha.py            # alpha estimation and inverse compositing
+├── checkpoints.py      # resumable analytic/residual chunk checkpoints
 ├── chunks.py           # bounded scene chunk planning
 ├── cli.py              # CLI argument handling
 ├── disk.py             # disk-space estimation and preflight
@@ -230,9 +264,11 @@ watermark_remover/
 ├── motion.py           # optical-flow alignment
 ├── pipeline.py         # orchestration
 ├── ports.py            # protocols
+├── progress.py         # structured progress events/reporters
 ├── reporting.py        # CSV quality reporting
 ├── scenes.py           # hard scene-cut detection
 ├── ui.py               # optional Gradio UI
+├── ui_preflight.py     # UI readiness/preflight reporting
 └── video.py            # probing, extraction and audio muxing
 ```
 
@@ -245,7 +281,7 @@ ruff check .
 mypy watermark_remover
 ```
 
-The suite covers alpha math, residual masks, chunk/scene isolation, optical flow, mask providers, reporting, ProPainter adapter validation, pipeline temporal windows, disk preflight and UI-to-pipeline mapping/delegation.
+The suite covers alpha math, residual masks, chunk/scene isolation, optical flow, mask providers, reporting, ProPainter adapter validation, pipeline temporal windows, disk preflight, resumable checkpoints, UI preflight, interactive region selection and progress delegation.
 
 ## Continuous integration and security
 
@@ -253,7 +289,7 @@ Every push to `main` and pull request is checked with dependency consistency, Ru
 
 ## Remaining improvements
 
-Useful next steps include resumable scene/chunk checkpoints, an interactive mask editor, direct `Sam21MaskProvider` integration, structured run manifests/logging, GPU integration tests, and container/lockfile reproducibility.
+Useful next steps include checkpointing frame extraction and the final ProPainter phase, direct `Sam21MaskProvider` integration, structured run manifests/logging, GPU integration tests, and container/lockfile reproducibility.
 
 ## Limitations
 
