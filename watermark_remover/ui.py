@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import cv2
+import numpy as np
+
 from .models import PipelineConfig, Region
 from .pipeline import WatermarkRemovalPipeline
 
@@ -81,6 +84,111 @@ def build_pipeline_config(
     return config
 
 
+def extract_preview_frame(input_video: str | Path | None) -> np.ndarray | None:
+    """Read the first video frame as RGB for interactive region selection."""
+    if input_video is None or not str(input_video).strip():
+        return None
+
+    capture = cv2.VideoCapture(str(input_video))
+    try:
+        ok, frame = capture.read()
+    finally:
+        capture.release()
+
+    if not ok or frame is None:
+        raise RuntimeError(f"Could not read a preview frame from {input_video}")
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+
+def region_from_points(
+    first: tuple[int, int],
+    second: tuple[int, int],
+    frame_width: int,
+    frame_height: int,
+) -> Region:
+    """Build a clamped positive rectangle from two opposite-corner clicks."""
+    if frame_width <= 0 or frame_height <= 0:
+        raise ValueError("Frame dimensions must be positive")
+
+    x1 = min(max(first[0], 0), frame_width - 1)
+    y1 = min(max(first[1], 0), frame_height - 1)
+    x2 = min(max(second[0], 0), frame_width - 1)
+    y2 = min(max(second[1], 0), frame_height - 1)
+
+    left, right = sorted((x1, x2))
+    top, bottom = sorted((y1, y2))
+    return Region(
+        x=left,
+        y=top,
+        width=max(1, right - left + 1),
+        height=max(1, bottom - top + 1),
+    )
+
+
+def update_region_selection(
+    frame: np.ndarray | None,
+    points: list[list[int]] | None,
+    point: tuple[int, int],
+) -> tuple[list[list[int]], float, float, float, float, bool, np.ndarray, str]:
+    """Apply one preview click and return updated region controls/overlay."""
+    if frame is None:
+        raise ValueError("Upload a video before selecting a watermark region")
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise ValueError("Preview frame must be an RGB image")
+
+    frame_height, frame_width = frame.shape[:2]
+    px = min(max(int(point[0]), 0), frame_width - 1)
+    py = min(max(int(point[1]), 0), frame_height - 1)
+    current = [] if points is None or len(points) >= 2 else [list(points[0])]
+    current.append([px, py])
+
+    overlay = frame.copy()
+    if len(current) == 1:
+        cv2.drawMarker(
+            overlay,
+            (px, py),
+            (255, 255, 255),
+            markerType=cv2.MARKER_CROSS,
+            markerSize=18,
+            thickness=2,
+        )
+        return (
+            current,
+            float(px),
+            float(py),
+            1.0,
+            1.0,
+            True,
+            overlay,
+            "First corner selected. Click the opposite corner.",
+        )
+
+    region = region_from_points(
+        (current[0][0], current[0][1]),
+        (current[1][0], current[1][1]),
+        frame_width,
+        frame_height,
+    )
+    cv2.rectangle(
+        overlay,
+        (region.x, region.y),
+        (region.x + region.width - 1, region.y + region.height - 1),
+        (255, 255, 255),
+        2,
+    )
+    return (
+        current,
+        float(region.x),
+        float(region.y),
+        float(region.width),
+        float(region.height),
+        True,
+        overlay,
+        f"Selected region: x={region.x}, y={region.y}, "
+        f"width={region.width}, height={region.height}.",
+    )
+
+
 def process_video(
     input_video: str | Path,
     propainter_dir: str | Path,
@@ -144,15 +252,34 @@ def build_app() -> Any:
             'Gradio UI dependencies are not installed. Run: pip install -e ".[ui]"'
         ) from exc
 
+    def load_preview(video: str | None) -> tuple[np.ndarray | None, list[list[int]], str]:
+        return extract_preview_frame(video), [], "Click two opposite corners of the watermark."
+
+    def select_region(
+        frame: np.ndarray | None,
+        points: list[list[int]] | None,
+        evt: Any,
+    ) -> tuple[list[list[int]], float, float, float, float, bool, np.ndarray, str]:
+        index = evt.index
+        if not isinstance(index, (tuple, list)) or len(index) < 2:
+            raise ValueError("Could not determine the selected image coordinates")
+        return update_region_selection(frame, points, (int(index[0]), int(index[1])))
+
     with gr.Blocks(title="Alpha-Aware Watermark Remover") as app:
         gr.Markdown(
             "# Alpha-Aware Watermark Remover\n"
             "Local UI for the existing scene-aware, temporal processing pipeline."
         )
+        region_points = gr.State([])
 
         with gr.Row():
             with gr.Column(scale=2):
                 input_video = gr.Video(label="Input video", sources=["upload"])
+                preview_image = gr.Image(
+                    label="Watermark region selector — click two opposite corners",
+                    type="numpy",
+                )
+                selector_status = gr.Markdown("Upload a video to select the watermark region.")
                 propainter_dir = gr.Textbox(
                     label="ProPainter directory",
                     placeholder="/path/to/ProPainter",
@@ -171,7 +298,7 @@ def build_app() -> Any:
                 custom_region = gr.Checkbox(
                     label="Use custom region",
                     value=False,
-                    info="Otherwise the pipeline's default bottom-right region is used.",
+                    info="Two preview clicks enable this automatically; manual values still work.",
                 )
                 with gr.Row():
                     x = gr.Number(label="X", value=0, precision=0)
@@ -229,6 +356,25 @@ def build_app() -> Any:
             result_video = gr.Video(label="Processed video")
             report_file = gr.File(label="Quality report")
 
+        input_video.change(
+            fn=load_preview,
+            inputs=[input_video],
+            outputs=[preview_image, region_points, selector_status],
+        )
+        preview_image.select(
+            fn=select_region,
+            inputs=[preview_image, region_points],
+            outputs=[
+                region_points,
+                x,
+                y,
+                width,
+                height,
+                custom_region,
+                preview_image,
+                selector_status,
+            ],
+        )
         process_button.click(
             fn=process_video,
             inputs=[
