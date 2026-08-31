@@ -1,10 +1,18 @@
 # Alpha-Aware Temporal Watermark Remover
 
-A maintainable Python pipeline for removing watermarks from **video you own or have permission to edit**.
+Version **1.2.0** — a maintainable Python pipeline for removing watermarks from **video you own or have permission to edit**.
 
 The project combines alpha-aware inverse compositing, scene-aware temporal analysis, optical-flow alignment, residual AI inpainting with ProPainter, bounded-memory processing, disk-space preflight checks, and an optional local Gradio UI.
 
-> Package metadata is currently `1.1.0`; this README documents the full feature set available on `main`.
+## What’s new in 1.2.0
+
+- **Optional Gradio UI** for upload, preview, region/mask selection, tuning, processing and result download.
+- **Disk-space preflight checks** before frame extraction and inference.
+- **OpenCV 5 support** via `opencv-python>=4.8,<6` while retaining OpenCV 4 compatibility.
+- **Expanded tests** for disk preflight and UI-to-pipeline configuration/delegation.
+- **Updated GitHub Actions dependencies** and the existing CI/security gates remain in place.
+
+See [`RELEASE_NOTES_1.2.0.md`](RELEASE_NOTES_1.2.0.md) for the full release notes.
 
 ## Highlights
 
@@ -13,10 +21,9 @@ The project combines alpha-aware inverse compositing, scene-aware temporal analy
 - **Scene-aware processing** — temporal windows stay inside detected visual shots.
 - **Optical-flow alignment** — neighbouring frames are warped before temporal background estimation.
 - **Bounded RAM usage** — processing is chunked instead of loading the full video into memory.
-- **Flexible masks** — use per-frame masks or a rectangular fallback region through the `MaskProvider` strategy.
-- **Disk-space preflight** — checks scratch and output capacity before expensive frame extraction/inference begins.
-- **Local web UI** — optional Gradio interface for upload, preview, region/mask selection, tuning, processing and result download.
-- **OpenCV 4/5 support** — `opencv-python>=4.8,<6`.
+- **Flexible masks** — per-frame masks or a rectangular fallback region through the `MaskProvider` strategy.
+- **Disk-space preflight** — checks scratch and output capacity before expensive work begins.
+- **Local web UI** — optional Gradio interface built as a thin adapter over the same pipeline used by the CLI.
 - **Production-oriented CI** — Ruff, mypy, pytest/coverage, Bandit, pip-audit, packaging checks and CodeQL.
 
 ## How it works
@@ -27,22 +34,15 @@ A translucent watermark can be approximated by:
 O = αF + (1 - α)B
 ```
 
-where:
+where `O` is the observed pixel, `α` the watermark opacity, `F` the watermark colour and `B` the hidden background.
 
-- `O` = observed video pixel
-- `α` = watermark opacity
-- `F` = watermark colour
-- `B` = hidden background
-
-When `α` and `F` can be estimated, the background can be approximated by:
+When `α` and `F` can be estimated:
 
 ```text
 B = (O - αF) / (1 - α)
 ```
 
-The inverse becomes unstable as `α` approaches `1`, so the pipeline calculates confidence and sends uncertain pixels to ProPainter rather than trusting the analytic reconstruction.
-
-The processing flow is:
+The inverse becomes unstable as `α` approaches `1`, so the pipeline calculates confidence and routes uncertain pixels to ProPainter instead of trusting the analytic reconstruction.
 
 ```text
 Input video
@@ -95,19 +95,19 @@ analytic recovery  residual AI mask
 
 Python 3.10 or newer is required.
 
-Create a virtual environment and install the core package:
+Core package:
 
 ```bash
 pip install -e .
 ```
 
-For the optional local UI:
+Optional UI:
 
 ```bash
 pip install -e ".[ui]"
 ```
 
-For development tools:
+Development tools:
 
 ```bash
 pip install -e ".[dev]"
@@ -123,35 +123,21 @@ Install ProPainter separately according to its upstream instructions and licence
 
 ## Local Gradio UI
 
-The easiest way to use the project interactively is the optional Gradio UI:
+Launch the optional UI with:
 
 ```bash
 watermark-remove-ui
 ```
 
-The UI provides:
+The UI exposes video upload/preview, ProPainter and output paths, per-frame masks, custom watermark-region coordinates, scene/chunk/temporal controls, motion compensation, alpha/confidence tuning, ProPainter memory controls, FP16/debug options, processed-video preview and quality-report download.
 
-- video upload and preview;
-- ProPainter and output paths;
-- per-frame mask-directory input;
-- custom watermark-region coordinates;
-- chunk size and temporal radius;
-- scene-cut controls;
-- optical-flow motion-compensation toggle;
-- alpha/confidence thresholds;
-- residual-mask dilation;
-- ProPainter neighbour/reference settings;
-- resize ratio, FP16 and debug-output controls;
-- processed-video preview;
-- quality-report download.
+The UI deliberately delegates to `PipelineConfig` and `WatermarkRemovalPipeline`; processing logic is not duplicated.
 
-The UI is intentionally a thin adapter around `PipelineConfig` and `WatermarkRemovalPipeline`, so processing behaviour stays aligned with the CLI rather than being duplicated in a second implementation.
-
-See [`UI.md`](UI.md) for detailed UI setup and security guidance.
+See [`UI.md`](UI.md) for detailed setup and deployment/security guidance.
 
 ## Command-line usage
 
-### With per-frame masks
+With per-frame masks:
 
 ```bash
 watermark-remove input.mp4 \
@@ -160,7 +146,7 @@ watermark-remove input.mp4 \
   --fp16
 ```
 
-### With a known region
+With a known region:
 
 ```bash
 watermark-remove input.mp4 \
@@ -171,94 +157,37 @@ watermark-remove input.mp4 \
 
 If neither masks nor explicit coordinates are supplied, the pipeline uses its default bottom-right fallback region.
 
-## Processing controls
-
-### Chunk size
+## Key processing controls
 
 ```bash
 --chunk-size 24
-```
-
-Controls how many output frames are processed at once. Smaller values reduce peak RAM; larger values reduce repeated disk reads.
-
-### Temporal radius
-
-```bash
 --temporal-radius 2
-```
-
-A radius of `2` uses up to two preceding and two following frames from the same detected scene.
-
-### Scene-cut threshold
-
-```bash
 --scene-threshold 0.62
-```
-
-Hard scene cuts are detected from HSV histogram similarity. Temporal windows never intentionally cross a detected cut.
-
-### Minimum scene length
-
-```bash
 --min-scene-length 10
+--alpha-inpaint 0.55
+--analytic-confidence-min 0.28
+--residual-dilate 3
+--neighbor-length 6
+--ref-stride 14
+--resize-ratio 0.75
+--fp16
 ```
 
-Avoids creating extremely short scenes from transient histogram changes.
-
-### Motion compensation
-
-Optical-flow alignment is enabled by default. To disable it:
+Optical-flow alignment is enabled by default; disable it with:
 
 ```bash
 --no-motion-compensation
 ```
 
-### Alpha threshold for AI fallback
-
-```bash
---alpha-inpaint 0.55
-```
-
-Higher estimated opacity is treated as less trustworthy for inverse compositing and routed to ProPainter.
-
-### Analytic confidence threshold
-
-```bash
---analytic-confidence-min 0.28
-```
-
-Low-confidence pixels are included in the residual inpainting mask.
-
-### Residual dilation
-
-```bash
---residual-dilate 3
-```
-
-Adds a small safety border around uncertain pixels to cover anti-aliased edges and glow.
-
-### ProPainter GPU-memory controls
-
-```bash
---neighbor-length 6 \
---ref-stride 14 \
---resize-ratio 0.75 \
---fp16
-```
-
-These are independent of the pipeline's CPU/RAM chunk size.
-
 ## Disk-space preflight
 
-The pipeline estimates scratch and destination requirements before processing starts.
+Before processing, the pipeline estimates scratch and destination requirements. The estimate accounts for materialized source/intermediate frames, optional debug output and a conservative output reserve.
 
-The scratch estimate accounts for the frame sets materialized during processing, including source, analytic, residual and inpainted frames, with additional allowance when debug images are enabled. The output filesystem also receives a conservative reserve for the encoded/muxed result.
-
-If capacity is insufficient, the run fails early with required and available space reported in human-readable units instead of failing late after frame extraction or inference.
+If capacity is insufficient, the run fails early with required and available space reported in human-readable units instead of failing late after extraction or inference.
 
 ## Mask providers
 
-Mask acquisition is separated from orchestration through a small strategy interface:
+Mask acquisition is separated from orchestration:
 
 ```text
 MaskProvider
@@ -266,72 +195,37 @@ MaskProvider
 └── DirectoryMaskProvider
 ```
 
-`DirectoryMaskProvider` can fall back to a region mask when a per-frame mask is missing.
-
-This keeps future integrations isolated from the core pipeline. A direct SAM 2.1 provider could implement the same interface:
-
-```python
-class Sam21MaskProvider:
-    def get_mask(
-        self,
-        frame_index: int,
-        frame_width: int,
-        frame_height: int,
-    ) -> np.ndarray:
-        ...
-```
+`DirectoryMaskProvider` can fall back to a region mask when a per-frame mask is missing. This keeps future integrations such as a direct SAM 2.1 provider isolated from the core pipeline.
 
 ## Memory characteristics
 
-The pipeline does not construct a list containing every decoded video frame.
-
-For each scene chunk it loads approximately:
+For each scene chunk the pipeline loads approximately:
 
 ```text
 process frames + left temporal overlap + right temporal overlap
 ```
 
-For example:
-
-```text
-chunk size       = 24 frames
-temporal radius  = 2 frames
-maximum loaded   ≈ 28 frames
-```
-
-Decoded-image memory therefore scales with chunk size and temporal overlap rather than total video duration.
-
-Scratch-disk usage can still be significant because extracted and processed frames are materialized for the external inpainting stage, which is why disk-space preflight is performed before extraction.
+For example, a chunk size of 24 with temporal radius 2 loads roughly 28 decoded frames for a normal interior chunk. RAM use therefore scales with chunk size rather than total video duration.
 
 ## Quality report
 
-Each successful run produces a CSV containing:
-
-- frame index;
-- support-mask pixel count;
-- residual inpainting pixel count;
-- mean estimated alpha;
-- mean analytic confidence;
-- residual fraction.
-
-This helps identify frames where most of the marked region had to be regenerated rather than analytically recovered.
+Each successful run produces a CSV containing frame index, support-mask pixel count, residual inpainting pixel count, mean estimated alpha, mean analytic confidence and residual fraction.
 
 ## Package structure
 
 ```text
 watermark_remover/
-├── __init__.py
 ├── alpha.py            # alpha estimation and inverse compositing
 ├── chunks.py           # bounded scene chunk planning
 ├── cli.py              # CLI argument handling
-├── disk.py             # disk-space estimation and preflight checks
+├── disk.py             # disk-space estimation and preflight
 ├── infra.py            # subprocess + ProPainter adapter
 ├── mask_providers.py   # MaskProvider strategies
-├── masks.py            # mask file/region primitives
-├── models.py           # typed configuration and value objects
+├── masks.py            # mask primitives
+├── models.py           # typed configuration/value objects
 ├── motion.py           # optical-flow alignment
-├── pipeline.py         # application orchestration
-├── ports.py            # dependency-inversion protocols
+├── pipeline.py         # orchestration
+├── ports.py            # protocols
 ├── reporting.py        # CSV quality reporting
 ├── scenes.py           # hard scene-cut detection
 ├── ui.py               # optional Gradio UI
@@ -340,91 +234,26 @@ watermark_remover/
 
 ## Tests and quality checks
 
-Run the test suite:
-
 ```bash
 pytest
-```
-
-Coverage:
-
-```bash
 pytest --cov=watermark_remover --cov-report=term-missing
-```
-
-Static checks:
-
-```bash
 ruff check .
 mypy watermark_remover
 ```
 
-The suite covers the deterministic numerical core and orchestration seams, including:
-
-- alpha inverse-compositing math;
-- residual-mask behaviour;
-- chunk bounds and scene isolation;
-- optical-flow alignment;
-- mask-provider strategies;
-- reporting;
-- ProPainter adapter validation;
-- pipeline temporal-window clipping;
-- disk-space estimation/preflight behaviour;
-- UI-to-`PipelineConfig` mapping and pipeline delegation.
-
-GPU/model-heavy tests remain a separate integration concern so normal development and pull requests stay fast and reproducible.
+The suite covers alpha math, residual masks, chunk/scene isolation, optical flow, mask providers, reporting, ProPainter adapter validation, pipeline temporal windows, disk preflight and UI-to-pipeline mapping/delegation.
 
 ## Continuous integration and security
 
-Every push to `main` and every pull request is checked by GitHub Actions.
-
-CI validates:
-
-- dependency consistency with `pip check`;
-- linting with Ruff;
-- static typing with mypy;
-- tests on Python 3.10 and 3.12;
-- branch-aware coverage with a 60% minimum threshold;
-- Bandit static security findings;
-- known dependency vulnerabilities with `pip-audit`;
-- wheel/source-distribution creation;
-- package metadata with `twine check`.
-
-A separate CodeQL workflow runs on pushes, pull requests and a weekly schedule. Dependabot monitors Python dependencies and GitHub Actions.
-
-## Design principles
-
-The codebase deliberately keeps responsibilities separated instead of putting the complete workflow into one script:
-
-- **Single Responsibility Principle** — numerical processing, scenes, masks, video I/O, disk checks, external tools, reporting, UI and orchestration live in separate modules.
-- **Strategy pattern** — masks are supplied through `MaskProvider` implementations.
-- **Dependency inversion** — external commands and inpainting backends are accessed through protocols/adapters.
-- **Pure functions where practical** — numerical operations are isolated from filesystem/subprocess effects.
-- **Fail fast** — invalid configuration, missing dependencies and insufficient disk space are detected before expensive work.
-- **Immutable configuration/value objects** — dataclasses are frozen where appropriate.
-- **Bounded resource use** — memory scales with configured chunk size rather than video length.
-- **Testable seams** — process runners, pipelines and mask providers can be replaced with test doubles.
+Every push to `main` and pull request is checked with dependency consistency, Ruff, mypy, tests on Python 3.10 and 3.12, branch coverage, Bandit, pip-audit, package build/metadata checks and CodeQL. Dependabot monitors Python dependencies and GitHub Actions.
 
 ## Remaining improvements
 
-Useful next steps include:
-
-- resumable scene/chunk checkpoints;
-- structured logging and a per-run model/config manifest;
-- automated quality gates and retry policies;
-- direct `Sam21MaskProvider` integration;
-- an interactive mask editor in the UI;
-- a GPU integration-test workflow;
-- container/lockfile reproducibility;
-- scene-level parallel scheduling where GPU memory permits.
+Useful next steps include resumable scene/chunk checkpoints, an interactive mask editor, direct `Sam21MaskProvider` integration, structured run manifests/logging, GPU integration tests, and container/lockfile reproducibility.
 
 ## Limitations
 
-Alpha and watermark colour cannot generally be uniquely recovered from a single composite image. The estimator uses temporal statistics and residual magnitude as a practical approximation.
-
-Optical flow can fail around occlusion, large motion, severe blur, repeated textures and abrupt lighting changes. Scene isolation reduces one major failure mode but cannot eliminate all motion-estimation errors.
-
-No inpainting method can guarantee recovery of information that was never visible in any source frame.
+Alpha and watermark colour cannot generally be uniquely recovered from a single composite image. Optical flow can fail around occlusion, large motion, severe blur, repeated textures and abrupt lighting changes. No inpainting method can guarantee recovery of information that was never visible in any source frame.
 
 Use this tool only on material you own or have permission to modify.
 
@@ -432,6 +261,6 @@ Use this tool only on material you own or have permission to modify.
 
 The source code in this repository is licensed under the MIT License; see [`LICENSE`](LICENSE).
 
-Third-party components are governed by their own licences. Installing or invoking ProPainter, SAM 2, SAM 2.1, FFmpeg, Gradio or other external software does **not** make those components MIT-licensed. Review their current licence terms before commercial use, redistribution or deployment.
+Third-party components are governed by their own licences. Installing or invoking ProPainter, SAM 2/2.1, FFmpeg, Gradio or other external software does **not** make those components MIT-licensed. Review their current licence terms before commercial use, redistribution or deployment.
 
 Security reporting guidance is documented in [`SECURITY.md`](SECURITY.md).
