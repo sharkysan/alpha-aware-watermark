@@ -138,7 +138,7 @@ def process_video(
 def build_app() -> Any:
     """Build the optional local Gradio application."""
     try:
-        import gradio as gr
+        import gradio as gr  # type: ignore[import-not-found]
     except ImportError as exc:
         raise RuntimeError(
             'Gradio UI dependencies are not installed. Run: pip install -e ".[ui]"'
