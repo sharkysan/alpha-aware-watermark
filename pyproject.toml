@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alpha-aware-watermark-remover"
-version = "1.1.0"
+version = "1.2.0"
 description = "Alpha-aware temporal watermark removal pipeline"
 requires-python = ">=3.10"
 dependencies = [
