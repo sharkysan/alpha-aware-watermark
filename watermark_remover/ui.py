@@ -8,6 +8,7 @@ import numpy as np
 
 from .models import PipelineConfig, Region
 from .pipeline import WatermarkRemovalPipeline
+from .progress import PipelineProgress, ProgressReporter
 from .ui_preflight import build_ui_preflight_report
 
 
@@ -38,7 +39,6 @@ def build_pipeline_config(
     """Translate UI values into the same PipelineConfig used by the CLI."""
     input_path = Path(input_video).expanduser()
     propainter_path = Path(propainter_dir).expanduser()
-
     destination = (
         Path(output_dir).expanduser()
         if output_dir is not None and str(output_dir).strip()
@@ -53,12 +53,7 @@ def build_pipeline_config(
 
     region = None
     if custom_region:
-        region = Region(
-            x=int(x),
-            y=int(y),
-            width=int(width),
-            height=int(height),
-        )
+        region = Region(x=int(x), y=int(y), width=int(width), height=int(height))
 
     config = PipelineConfig(
         input_path=input_path,
@@ -89,13 +84,11 @@ def extract_preview_frame(input_video: str | Path | None) -> np.ndarray | None:
     """Read the first video frame as RGB for interactive region selection."""
     if input_video is None or not str(input_video).strip():
         return None
-
     capture = cv2.VideoCapture(str(input_video))
     try:
         ok, frame = capture.read()
     finally:
         capture.release()
-
     if not ok or frame is None:
         raise RuntimeError(f"Could not read a preview frame from {input_video}")
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -110,12 +103,10 @@ def region_from_points(
     """Build a clamped positive rectangle from two opposite-corner clicks."""
     if frame_width <= 0 or frame_height <= 0:
         raise ValueError("Frame dimensions must be positive")
-
     x1 = min(max(first[0], 0), frame_width - 1)
     y1 = min(max(first[1], 0), frame_height - 1)
     x2 = min(max(second[0], 0), frame_width - 1)
     y2 = min(max(second[1], 0), frame_height - 1)
-
     left, right = sorted((x1, x2))
     top, bottom = sorted((y1, y2))
     return Region(
@@ -136,13 +127,11 @@ def update_region_selection(
         raise ValueError("Upload a video before selecting a watermark region")
     if frame.ndim != 3 or frame.shape[2] != 3:
         raise ValueError("Preview frame must be an RGB image")
-
     frame_height, frame_width = frame.shape[:2]
     px = min(max(int(point[0]), 0), frame_width - 1)
     py = min(max(int(point[1]), 0), frame_height - 1)
     current = [] if not points or len(points) >= 2 else [list(points[0])]
     current.append([px, py])
-
     overlay = frame.copy()
     if len(current) == 1:
         cv2.drawMarker(
@@ -163,7 +152,6 @@ def update_region_selection(
             overlay,
             "First corner selected. Click the opposite corner.",
         )
-
     region = region_from_points(
         (current[0][0], current[0][1]),
         (current[1][0], current[1][1]),
@@ -231,6 +219,7 @@ def process_video(
     resize_ratio: float = 1.0,
     fp16: bool = False,
     save_debug: bool = False,
+    progress_reporter: ProgressReporter | None = None,
 ) -> tuple[str, str, str]:
     """Run one UI request and return video path, report path, and status text."""
     config = build_pipeline_config(
@@ -258,7 +247,10 @@ def process_video(
         save_debug=save_debug,
     )
     config.output_path.parent.mkdir(parents=True, exist_ok=True)
-    result = WatermarkRemovalPipeline(config).run()
+    result = WatermarkRemovalPipeline(
+        config,
+        progress_reporter=progress_reporter,
+    ).run()
     return str(result), str(config.report_path), "Processing completed successfully."
 
 
@@ -283,6 +275,60 @@ def build_app() -> Any:
         if not isinstance(index, (tuple, list)) or len(index) < 2:
             raise ValueError("Could not determine the selected image coordinates")
         return update_region_selection(frame, points, (int(index[0]), int(index[1])))
+
+    def process_with_progress(
+        input_video: str | Path,
+        propainter_dir: str | Path,
+        output_dir: str | Path | None,
+        mask_dir: str | Path | None,
+        custom_region: bool,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        temporal_radius: float,
+        chunk_size: float,
+        scene_threshold: float,
+        min_scene_length: float,
+        motion_compensation: bool,
+        alpha_inpaint_threshold: float,
+        analytic_confidence_min: float,
+        residual_dilate: float,
+        neighbor_length: float,
+        ref_stride: float,
+        resize_ratio: float,
+        fp16: bool,
+        save_debug: bool,
+        progress: Any = gr.Progress(),
+    ) -> tuple[str, str, str]:
+        def report(update: PipelineProgress) -> None:
+            progress(update.fraction, desc=update.message)
+
+        return process_video(
+            input_video,
+            propainter_dir,
+            output_dir,
+            mask_dir,
+            custom_region,
+            x,
+            y,
+            width,
+            height,
+            temporal_radius,
+            chunk_size,
+            scene_threshold,
+            min_scene_length,
+            motion_compensation,
+            alpha_inpaint_threshold,
+            analytic_confidence_min,
+            residual_dilate,
+            neighbor_length,
+            ref_stride,
+            resize_ratio,
+            fp16,
+            save_debug,
+            progress_reporter=report,
+        )
 
     with gr.Blocks(title="Alpha-Aware Watermark Remover") as app:
         gr.Markdown(
@@ -334,11 +380,7 @@ def build_app() -> Any:
                     1, 120, value=10, step=1, label="Minimum scene length"
                 )
             scene_threshold = gr.Slider(
-                -1.0,
-                1.0,
-                value=0.62,
-                step=0.01,
-                label="Scene-cut threshold",
+                -1.0, 1.0, value=0.62, step=0.01, label="Scene-cut threshold"
             )
             motion_compensation = gr.Checkbox(
                 label="Optical-flow motion compensation",
@@ -375,7 +417,7 @@ def build_app() -> Any:
             )
 
         process_button = gr.Button("Remove watermark", variant="primary")
-        status = gr.Markdown("Ready.")
+        status = gr.Markdown("Ready. Processing progress appears above while a run is active.")
 
         with gr.Row():
             result_video = gr.Video(label="Processed video")
@@ -406,7 +448,7 @@ def build_app() -> Any:
             outputs=[preflight_status],
         )
         process_button.click(
-            fn=process_video,
+            fn=process_with_progress,
             inputs=[
                 input_video,
                 propainter_dir,
