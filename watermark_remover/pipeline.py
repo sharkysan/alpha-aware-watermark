@@ -14,6 +14,7 @@ from .alpha import (
     temporal_median,
 )
 from .chunks import FrameChunk, iter_scene_chunks
+from .disk import ensure_disk_space, estimate_disk_space
 from .infra import ProPainterAdapter, SubprocessCommandRunner, require_executable
 from .mask_providers import DirectoryMaskProvider, MaskProvider, RegionMaskProvider
 from .models import PipelineConfig, QualityMetrics, Region
@@ -44,7 +45,8 @@ class WatermarkRemovalPipeline:
         if not self.config.input_path.exists():
             raise FileNotFoundError(self.config.input_path)
 
-        width, height, _, _ = probe_video(self.config.input_path)
+        width, height, _, frame_count = probe_video(self.config.input_path)
+        self._preflight_disk_space(width, height, frame_count)
         mask_provider = self._mask_provider or self._build_mask_provider(width, height)
 
         inpainter = ProPainterAdapter(
@@ -118,6 +120,25 @@ class WatermarkRemovalPipeline:
 
         write_quality_report(self.config.report_path, metrics)
         return self.config.output_path
+
+    def _preflight_disk_space(self, width: int, height: int, frame_count: int) -> None:
+        estimate = estimate_disk_space(
+            width=width,
+            height=height,
+            frame_count=frame_count,
+            input_size_bytes=self.config.input_path.stat().st_size,
+            save_debug=self.config.save_debug,
+        )
+        ensure_disk_space(
+            Path(tempfile.gettempdir()),
+            estimate.scratch_bytes,
+            label="scratch",
+        )
+        ensure_disk_space(
+            self.config.output_path.parent,
+            estimate.output_bytes,
+            label="output",
+        )
 
     def _build_mask_provider(self, width: int, height: int) -> MaskProvider:
         region = self._resolve_region(width, height)
