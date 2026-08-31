@@ -10,6 +10,8 @@ from typing import Any
 from .chunks import FrameChunk
 from .models import PipelineConfig, QualityMetrics
 
+CHECKPOINT_ALGORITHM_VERSION = 1
+
 
 class CheckpointStore:
     """Persistent analytic/residual chunk checkpoints for interrupted runs."""
@@ -100,6 +102,7 @@ def build_checkpoint_fingerprint(config: PipelineConfig) -> str:
     """Hash source identity and settings that affect reusable chunk outputs."""
     input_stat = config.input_path.stat()
     payload: dict[str, Any] = {
+        "algorithm_version": CHECKPOINT_ALGORITHM_VERSION,
         "input": {
             "path": str(config.input_path.expanduser().resolve()),
             "size": input_stat.st_size,
@@ -122,9 +125,12 @@ def build_checkpoint_fingerprint(config: PipelineConfig) -> str:
 
 
 def _checkpoint_root(config: PipelineConfig) -> Path:
-    if config.checkpoint_dir is not None:
-        return config.checkpoint_dir.expanduser()
-    return config.output_path.parent / ".alpha_wm_checkpoints" / config.input_path.stem
+    parent = (
+        config.checkpoint_dir.expanduser()
+        if config.checkpoint_dir is not None
+        else config.output_path.parent / ".alpha_wm_checkpoints"
+    )
+    return parent / config.input_path.stem
 
 
 def _mask_directory_identity(mask_dir: Path | None) -> list[dict[str, int | str]] | None:
