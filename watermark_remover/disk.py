@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,27 @@ def estimate_disk_space(
     return DiskSpaceEstimate(scratch_bytes=scratch_bytes, output_bytes=output_bytes)
 
 
+def ensure_pipeline_disk_space(
+    scratch_path: Path,
+    output_path: Path,
+    estimate: DiskSpaceEstimate,
+) -> None:
+    """Validate scratch/output capacity without double-counting shared free space."""
+    scratch_probe = _nearest_existing_path(scratch_path)
+    output_probe = _nearest_existing_path(output_path)
+
+    if _filesystem_device(scratch_probe) == _filesystem_device(output_probe):
+        ensure_disk_space(
+            scratch_probe,
+            estimate.scratch_bytes + estimate.output_bytes,
+            label="combined scratch/output",
+        )
+        return
+
+    ensure_disk_space(scratch_probe, estimate.scratch_bytes, label="scratch")
+    ensure_disk_space(output_probe, estimate.output_bytes, label="output")
+
+
 def ensure_disk_space(path: Path, required_bytes: int, *, label: str) -> None:
     """Raise RuntimeError when the filesystem containing path lacks free space."""
     if required_bytes < 0:
@@ -61,6 +83,10 @@ def ensure_disk_space(path: Path, required_bytes: int, *, label: str) -> None:
             f"requires {_format_bytes(required_bytes)}, "
             f"but only {_format_bytes(free_bytes)} is available."
         )
+
+
+def _filesystem_device(path: Path) -> int:
+    return os.stat(path).st_dev
 
 
 def _nearest_existing_path(path: Path) -> Path:

@@ -14,7 +14,7 @@ from .alpha import (
     temporal_median,
 )
 from .chunks import FrameChunk, iter_scene_chunks
-from .disk import ensure_disk_space, estimate_disk_space
+from .disk import ensure_pipeline_disk_space, estimate_disk_space
 from .infra import ProPainterAdapter, SubprocessCommandRunner, require_executable
 from .mask_providers import DirectoryMaskProvider, MaskProvider, RegionMaskProvider
 from .models import PipelineConfig, QualityMetrics, Region
@@ -129,15 +129,10 @@ class WatermarkRemovalPipeline:
             input_size_bytes=self.config.input_path.stat().st_size,
             save_debug=self.config.save_debug,
         )
-        ensure_disk_space(
+        ensure_pipeline_disk_space(
             Path(tempfile.gettempdir()),
-            estimate.scratch_bytes,
-            label="scratch",
-        )
-        ensure_disk_space(
             self.config.output_path.parent,
-            estimate.output_bytes,
-            label="output",
+            estimate,
         )
 
     def _build_mask_provider(self, width: int, height: int) -> MaskProvider:
