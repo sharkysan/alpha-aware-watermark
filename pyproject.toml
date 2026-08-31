@@ -12,6 +12,12 @@ dependencies = [
   "opencv-python>=4.8,<6"
 ]
 
+[project.urls]
+Homepage = "https://github.com/sharkysan/alpha-aware-watermark"
+Repository = "https://github.com/sharkysan/alpha-aware-watermark"
+Issues = "https://github.com/sharkysan/alpha-aware-watermark/issues"
+Releases = "https://github.com/sharkysan/alpha-aware-watermark/releases"
+
 [project.optional-dependencies]
 ui = [
   "gradio>=6.22,<7"
