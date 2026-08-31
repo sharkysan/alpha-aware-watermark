@@ -8,6 +8,7 @@ import numpy as np
 
 from .models import PipelineConfig, Region
 from .pipeline import WatermarkRemovalPipeline
+from .ui_preflight import build_ui_preflight_report
 
 
 def build_pipeline_config(
@@ -192,6 +193,21 @@ def update_region_selection(
     )
 
 
+def run_ui_preflight(
+    input_video: str | Path | None,
+    propainter_dir: str | Path | None,
+    output_dir: str | Path | None,
+    save_debug: bool,
+) -> str:
+    """Return the rendered preflight report used by the Gradio panel."""
+    return build_ui_preflight_report(
+        input_video,
+        propainter_dir,
+        output_dir,
+        save_debug=save_debug,
+    ).markdown
+
+
 def process_video(
     input_video: str | Path,
     propainter_dir: str | Path,
@@ -352,6 +368,12 @@ def build_app() -> Any:
                 fp16 = gr.Checkbox(label="Use FP16", value=False)
                 save_debug = gr.Checkbox(label="Save debug frames", value=False)
 
+        with gr.Accordion("Preflight", open=True):
+            preflight_button = gr.Button("Run preflight")
+            preflight_status = gr.Markdown(
+                "Upload a video and configure ProPainter, then run preflight."
+            )
+
         process_button = gr.Button("Remove watermark", variant="primary")
         status = gr.Markdown("Ready.")
 
@@ -377,6 +399,11 @@ def build_app() -> Any:
                 preview_image,
                 selector_status,
             ],
+        )
+        preflight_button.click(
+            fn=run_ui_preflight,
+            inputs=[input_video, propainter_dir, output_dir, save_debug],
+            outputs=[preflight_status],
         )
         process_button.click(
             fn=process_video,
