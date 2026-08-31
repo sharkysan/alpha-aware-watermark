@@ -43,9 +43,9 @@ class CheckpointStore:
             return None
 
         for index in range(chunk.process_start, chunk.process_end):
-            if not (self.analytic_dir / f"{index:05d}.png").is_file():
+            if not _nonempty_file(self.analytic_dir / f"{index:05d}.png"):
                 return None
-            if not (self.residual_dir / f"{index:05d}.png").is_file():
+            if not _nonempty_file(self.residual_dir / f"{index:05d}.png"):
                 return None
 
         try:
@@ -145,3 +145,10 @@ def _mask_directory_identity(mask_dir: Path | None) -> list[dict[str, int | str]
             }
         )
     return entries
+
+
+def _nonempty_file(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
