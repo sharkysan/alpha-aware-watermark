@@ -4,6 +4,8 @@ Version **1.3.0** — a maintainable Python pipeline for removing watermarks fro
 
 The project combines alpha-aware inverse compositing, scene-aware temporal analysis, optical-flow alignment, residual AI inpainting with ProPainter, bounded-memory processing, disk-space preflight checks, resumable checkpoints, and an optional local Gradio UI.
 
+Repository: [`sharkysan/alpha-aware-watermark`](https://github.com/sharkysan/alpha-aware-watermark)
+
 ## What’s new in 1.3.0
 
 - **Resumable chunk checkpoints** with `--resume` and optional `--checkpoint-dir`.
@@ -97,6 +99,13 @@ analytic recovery  residual AI mask
 ## Installation
 
 Python 3.10 or newer is required.
+
+Clone the current repository:
+
+```bash
+git clone https://github.com/sharkysan/alpha-aware-watermark.git
+cd alpha-aware-watermark
+```
 
 Core package:
 
