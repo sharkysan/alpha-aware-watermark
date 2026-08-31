@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -50,20 +51,35 @@ def build_ui_preflight_report(
             input_size_bytes=input_path.stat().st_size,
             save_debug=save_debug,
         )
-        scratch_free = shutil.disk_usage(_nearest_existing_path(Path(tempfile.gettempdir()))).free
-        output_free = shutil.disk_usage(_nearest_existing_path(destination)).free
+        scratch_probe = _nearest_existing_path(Path(tempfile.gettempdir()))
+        output_probe = _nearest_existing_path(destination)
+        scratch_free = shutil.disk_usage(scratch_probe).free
+        output_free = shutil.disk_usage(output_probe).free
+        same_filesystem = os.stat(scratch_probe).st_dev == os.stat(output_probe).st_dev
         rows.extend(
             [
                 ("Estimated scratch", _format_bytes(estimate.scratch_bytes)),
-                ("Scratch available", _format_bytes(scratch_free)),
                 ("Estimated output", _format_bytes(estimate.output_bytes)),
-                ("Output available", _format_bytes(output_free)),
             ]
         )
-        if scratch_free < estimate.scratch_bytes:
-            issues.append("Scratch filesystem does not have enough free space.")
-        if output_free < estimate.output_bytes:
-            issues.append("Output filesystem does not have enough free space.")
+        if same_filesystem:
+            combined_required = estimate.scratch_bytes + estimate.output_bytes
+            rows.append(("Shared filesystem available", _format_bytes(scratch_free)))
+            if scratch_free < combined_required:
+                issues.append(
+                    "Shared scratch/output filesystem does not have enough free space."
+                )
+        else:
+            rows.extend(
+                [
+                    ("Scratch available", _format_bytes(scratch_free)),
+                    ("Output available", _format_bytes(output_free)),
+                ]
+            )
+            if scratch_free < estimate.scratch_bytes:
+                issues.append("Scratch filesystem does not have enough free space.")
+            if output_free < estimate.output_bytes:
+                issues.append("Output filesystem does not have enough free space.")
 
     ffmpeg_path = shutil.which("ffmpeg")
     rows.append(("FFmpeg", ffmpeg_path or "Not found"))
