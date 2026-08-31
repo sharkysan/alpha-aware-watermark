@@ -139,7 +139,7 @@ def update_region_selection(
     frame_height, frame_width = frame.shape[:2]
     px = min(max(int(point[0]), 0), frame_width - 1)
     py = min(max(int(point[1]), 0), frame_height - 1)
-    current = [] if points is None or len(points) >= 2 else [list(points[0])]
+    current = [] if not points or len(points) >= 2 else [list(points[0])]
     current.append([px, py])
 
     overlay = frame.copy()
