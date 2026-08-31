@@ -131,6 +131,10 @@ watermark-remove-ui
 
 The UI exposes video upload/preview, ProPainter and output paths, per-frame masks, custom watermark-region coordinates, scene/chunk/temporal controls, motion compensation, alpha/confidence tuning, ProPainter memory controls, FP16/debug options, processed-video preview and quality-report download.
 
+<p align="center">
+  <img src="docs/images/gradio-ui-overview.png" alt="Alpha-Aware Watermark Remover Gradio UI overview" width="100%">
+</p>
+
 The UI deliberately delegates to `PipelineConfig` and `WatermarkRemovalPipeline`; processing logic is not duplicated.
 
 See [`UI.md`](UI.md) for detailed setup and deployment/security guidance.
