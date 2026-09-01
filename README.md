@@ -1,6 +1,6 @@
-# Alpha-Aware Temporal Watermark Remover
+# Alpha-Aware Watermark
 
-Version **1.3.0** — a maintainable Python pipeline for removing watermarks from **video you own or have permission to edit**.
+Version **1.3.0** — an alpha-aware temporal watermark removal pipeline for **video you own or have permission to edit**.
 
 The project combines alpha-aware inverse compositing, scene-aware temporal analysis, optical-flow alignment, residual AI inpainting with ProPainter, bounded-memory processing, disk-space preflight checks, resumable checkpoints, and an optional local Gradio UI.
 
@@ -144,7 +144,7 @@ watermark-remove-ui
 The UI exposes video upload/preview, interactive two-click watermark-region selection, ProPainter and output paths, per-frame masks, scene/chunk/temporal controls, motion compensation, alpha/confidence tuning, preflight readiness checks, live processing progress, ProPainter memory controls, FP16/debug options, processed-video preview and quality-report download.
 
 <p align="center">
-  <img src="docs/images/gradio-ui-overview.png" alt="Alpha-Aware Watermark Remover Gradio UI overview" width="100%">
+  <img src="docs/images/gradio-ui-overview.png" alt="Alpha-Aware Watermark Gradio UI overview" width="100%">
 </p>
 
 The UI deliberately delegates to `PipelineConfig` and `WatermarkRemovalPipeline`; processing logic is not duplicated.
