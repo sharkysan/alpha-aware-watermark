@@ -62,6 +62,7 @@ class WatermarkRemovalPipeline:
             ref_stride=self.config.ref_stride,
             resize_ratio=self.config.resize_ratio,
             fp16=self.config.fp16,
+            python_executable=self.config.propainter_python,
         )
         inpainter.validate()
 
