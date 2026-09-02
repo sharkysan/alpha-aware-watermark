@@ -271,10 +271,17 @@ def build_app() -> Any:
         points: list[list[int]] | None,
         evt: Any,
     ) -> tuple[list[list[int]], float, float, float, float, bool, np.ndarray, str]:
+        if evt is None:
+            raise RuntimeError("Gradio did not provide SelectData for the image click")
         index = evt.index
         if not isinstance(index, (tuple, list)) or len(index) < 2:
             raise ValueError("Could not determine the selected image coordinates")
         return update_region_selection(frame, points, (int(index[0]), int(index[1])))
+
+    # Gradio detects event-data parameters from the runtime annotation. Because
+    # Gradio is an optional dependency imported inside build_app(), bind the
+    # concrete type here instead of importing Gradio at module import time.
+    select_region.__annotations__["evt"] = gr.SelectData
 
     def process_with_progress(
         input_video: str | Path,
