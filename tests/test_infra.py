@@ -1,6 +1,9 @@
+import subprocess
 from pathlib import Path
 
-from watermark_remover.infra import ProPainterAdapter
+import pytest
+
+from watermark_remover.infra import ProPainterAdapter, SubprocessCommandRunner
 
 
 class FakeRunner:
@@ -12,9 +15,9 @@ class FakeRunner:
 
 
 def test_propainter_builds_expected_command(tmp_path: Path):
-    repo = tmp_path/"ProPainter"
+    repo = tmp_path / "ProPainter"
     repo.mkdir()
-    (repo/"inference_propainter.py").write_text("# stub", encoding="utf-8")
+    (repo / "inference_propainter.py").write_text("# stub", encoding="utf-8")
 
     runner = FakeRunner()
     adapter = ProPainterAdapter(
@@ -28,3 +31,38 @@ def test_propainter_builds_expected_command(tmp_path: Path):
 
     adapter.validate()
     assert adapter.inference_script.exists()
+
+
+def test_subprocess_runner_surfaces_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*args, **kwargs):
+        raise subprocess.CalledProcessError(
+            returncode=8,
+            cmd=args[0],
+            stderr="Unrecognized option 'vsync'.",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fail)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        SubprocessCommandRunner().run(["ffmpeg", "-bad-option"])
+
+    message = str(exc_info.value)
+    assert "exit code 8" in message
+    assert "ffmpeg" in message
+    assert "Unrecognized option 'vsync'." in message
+
+
+def test_subprocess_runner_captures_text_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def succeed(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", succeed)
+    SubprocessCommandRunner().run(["ffmpeg", "-version"])
+
+    _, kwargs = calls[0]
+    assert kwargs["check"] is True
+    assert kwargs["text"] is True
+    assert kwargs["capture_output"] is True

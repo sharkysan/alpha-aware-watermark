@@ -33,8 +33,6 @@ def extract_frames(
             "-y",
             "-i",
             str(input_path),
-            "-vsync",
-            "0",
             str(output_dir / "%06d.png"),
         ]
     )
