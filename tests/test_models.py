@@ -28,6 +28,7 @@ def test_residual_fraction_handles_zero_support():
         ("neighbor_length", 0),
         ("ref_stride", 0),
         ("resize_ratio", 0),
+        ("roi_padding", -1),
     ],
 )
 def test_pipeline_config_validation(field, value, tmp_path: Path):
