@@ -8,7 +8,7 @@ The repository includes an optional local web UI that wraps the same `PipelineCo
 pip install -e ".[ui]"
 ```
 
-The UI extra installs Gradio and the Gradio 6 compatible bounding-box selector used for drag-to-select watermark regions. FFmpeg and ProPainter are still external prerequisites.
+FFmpeg and ProPainter are still external prerequisites.
 
 ## Launch
 
@@ -18,33 +18,42 @@ watermark-remove-ui
 
 Gradio starts a local web application and prints its local address in the terminal.
 
-## Interactive watermark region selection
+## Drag-to-select watermark region
 
-After uploading a video, the UI extracts the first frame and loads it into the watermark-region selector.
+After uploading a video, the UI extracts the first frame and opens it in a bounding-box selector.
 
-1. Drag directly over the preview to draw a rectangle around the watermark.
-2. Drag the rectangle to move it, or use its handles to resize it.
-3. The UI automatically fills `x`, `y`, `width`, and `height` and enables the custom region.
-4. Remove the box to clear the selection, or edit the numeric fields for exact manual adjustment.
+1. Drag a rectangle around the watermark.
+2. Move the selected rectangle by dragging it, or resize it with its handles.
+3. The UI synchronizes the rectangle into `x`, `y`, `width`, and `height` and enables the custom region automatically.
 
-The selector is intentionally limited to one box because the current pipeline accepts one rectangular fallback region. If a per-frame mask directory is supplied, those masks still take precedence and the rectangle remains the fallback behavior used by the pipeline.
+The selector keeps at most one active box. Remove it and draw another box to replace the selection. The numeric region fields remain editable for precise manual adjustment.
 
-## UI layout
+If a per-frame mask directory is supplied, those masks still take precedence and the region remains the fallback behavior used by the pipeline.
 
-The main **Process** tab follows the visual workflow shown in the project overview screenshot:
+## ProPainter Python environment
 
-- video upload and a large drag-to-select preview on the left;
-- region coordinates, ProPainter/output paths, preflight and the primary processing action on the right;
-- advanced temporal, scene, optical-flow, alpha and ProPainter controls in a collapsible section;
-- processed-video preview and quality-report download below the processing controls.
+The UI can run ProPainter with a Python executable different from the Python that runs Gradio. This is recommended when ProPainter is installed in a dedicated Conda environment or virtual environment.
 
-An **About** tab gives a short workflow summary without duplicating the detailed processing documentation.
+On Windows, for example:
+
+```text
+ProPainter directory:
+C:\Work\ProPainter
+
+ProPainter Python executable:
+C:\Users\you\miniconda3\envs\propainter\python.exe
+```
+
+Leave **ProPainter Python executable** blank to use the same Python interpreter as the UI.
+
+The preflight runs the selected interpreter from the ProPainter directory and verifies that core runtime imports such as `imageio`, `torch`, `torchvision`, `cv2`, and `numpy` succeed. It also reports the detected Python and PyTorch versions. A missing dependency therefore fails before the expensive video-processing phase starts.
 
 ## Available controls
 
 - upload and preview the input video;
-- drag, move and resize a rectangular watermark region directly on a preview frame;
+- draw, move, and resize a rectangular watermark region directly on a preview frame;
 - configure the local ProPainter directory;
+- select the Python executable for the ProPainter environment;
 - choose an output directory;
 - use a per-frame mask directory or the pipeline's region mask;
 - manually edit custom `x`, `y`, `width`, and `height` values;
@@ -54,6 +63,7 @@ An **About** tab gives a short workflow summary without duplicating the detailed
 - tune alpha confidence and residual-mask thresholds;
 - tune ProPainter neighbour length, reference stride, and resize ratio;
 - enable FP16 and debug-frame output;
+- run preflight checks for FFmpeg, disk capacity, ProPainter, and its Python environment;
 - preview the processed video;
 - download the quality CSV report.
 
