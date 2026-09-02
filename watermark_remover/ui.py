@@ -221,10 +221,10 @@ def region_from_annotation(annotation: dict[str, Any] | None) -> Region | None:
     if not boxes:
         return None
     box = boxes[0]
-    xmin = int(round(float(box["xmin"])))
-    ymin = int(round(float(box["ymin"])))
-    xmax = int(round(float(box["xmax"])))
-    ymax = int(round(float(box["ymax"])))
+    xmin = round(float(box["xmin"]))
+    ymin = round(float(box["ymin"]))
+    xmax = round(float(box["xmax"]))
+    ymax = round(float(box["ymax"]))
     left, right = sorted((xmin, xmax))
     top, bottom = sorted((ymin, ymax))
     return Region(
