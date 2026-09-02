@@ -12,7 +12,21 @@ class SubprocessCommandRunner:
     """Thin adapter around subprocess for dependency inversion and testability."""
 
     def run(self, args: list[str], cwd: Path | None = None) -> None:
-        subprocess.run(args, cwd=cwd, check=True)
+        try:
+            subprocess.run(
+                args,
+                cwd=cwd,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            command = subprocess.list2cmdline(args)
+            details = (exc.stderr or exc.stdout or "").strip()
+            message = f"Command failed with exit code {exc.returncode}: {command}"
+            if details:
+                message = f"{message}\n\n{details}"
+            raise RuntimeError(message) from exc
 
 
 def require_executable(name: str) -> None:
