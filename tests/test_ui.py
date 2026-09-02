@@ -22,6 +22,7 @@ def test_build_pipeline_config_uses_input_directory_by_default(tmp_path: Path):
     assert config.report_path == tmp_path / "clip_alpha_quality.csv"
     assert config.region is None
     assert config.mask_dir is None
+    assert config.roi_padding == 32
 
 
 def test_build_pipeline_config_maps_custom_region_and_mask(tmp_path: Path):
@@ -41,6 +42,7 @@ def test_build_pipeline_config_maps_custom_region_and_mask(tmp_path: Path):
         chunk_size=48,
         motion_compensation=False,
         fp16=True,
+        roi_padding=40,
     )
     assert config.output_path == output_dir / "clip_alpha_clean.mp4"
     assert config.report_path == output_dir / "clip_alpha_quality.csv"
@@ -50,6 +52,7 @@ def test_build_pipeline_config_maps_custom_region_and_mask(tmp_path: Path):
     assert config.chunk_size == 48
     assert config.motion_compensation is False
     assert config.fp16 is True
+    assert config.roi_padding == 40
 
 
 def test_build_pipeline_config_reuses_model_validation(tmp_path: Path):
