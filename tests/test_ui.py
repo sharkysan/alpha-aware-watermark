@@ -8,6 +8,7 @@ from watermark_remover.progress import PipelineProgress
 from watermark_remover.ui import (
     build_pipeline_config,
     process_video,
+    region_from_annotation,
     region_from_points,
     update_region_selection,
 )
@@ -59,6 +60,24 @@ def test_build_pipeline_config_reuses_model_validation(tmp_path: Path):
 def test_region_from_points_normalizes_direction_and_clamps() -> None:
     region = region_from_points((90, 70), (-5, 20), frame_width=100, frame_height=80)
     assert region == Region(x=0, y=20, width=91, height=51)
+
+
+def test_region_from_annotation_maps_dragged_box() -> None:
+    annotation = {
+        "image": np.zeros((80, 100, 3), dtype=np.uint8),
+        "boxes": [{"xmin": 12, "ymin": 17, "xmax": 52, "ymax": 44}],
+    }
+    assert region_from_annotation(annotation) == Region(x=12, y=17, width=40, height=27)
+
+
+def test_region_from_annotation_normalizes_and_handles_empty_selection() -> None:
+    assert region_from_annotation(None) is None
+    assert region_from_annotation({"image": None, "boxes": []}) is None
+    annotation = {
+        "image": None,
+        "boxes": [{"xmin": 50, "ymin": 30, "xmax": 10, "ymax": 5}],
+    }
+    assert region_from_annotation(annotation) == Region(x=10, y=5, width=40, height=25)
 
 
 def test_update_region_selection_uses_two_opposite_corner_clicks() -> None:
