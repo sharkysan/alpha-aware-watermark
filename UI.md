@@ -8,7 +8,7 @@ The repository includes an optional local web UI that wraps the same `PipelineCo
 pip install -e ".[ui]"
 ```
 
-FFmpeg and ProPainter are still external prerequisites.
+The UI extra installs Gradio and the Gradio 6 compatible bounding-box selector used for drag-to-select watermark regions. FFmpeg and ProPainter are still external prerequisites.
 
 ## Launch
 
@@ -20,20 +20,30 @@ Gradio starts a local web application and prints its local address in the termin
 
 ## Interactive watermark region selection
 
-After uploading a video, the UI extracts the first frame and shows it in the watermark-region selector.
+After uploading a video, the UI extracts the first frame and loads it into the watermark-region selector.
 
-1. Click one corner of the watermark.
-2. Click the opposite corner.
-3. The UI fills `x`, `y`, `width`, and `height`, enables the custom region, and draws the selected rectangle on the preview.
+1. Drag directly over the preview to draw a rectangle around the watermark.
+2. Drag the rectangle to move it, or use its handles to resize it.
+3. The UI automatically fills `x`, `y`, `width`, and `height` and enables the custom region.
+4. Remove the box to clear the selection, or edit the numeric fields for exact manual adjustment.
 
-A third click starts a new selection. The numeric region fields remain editable for precise manual adjustment.
+The selector is intentionally limited to one box because the current pipeline accepts one rectangular fallback region. If a per-frame mask directory is supplied, those masks still take precedence and the rectangle remains the fallback behavior used by the pipeline.
 
-If a per-frame mask directory is supplied, those masks still take precedence and the region remains the fallback behavior used by the pipeline.
+## UI layout
+
+The main **Process** tab follows the visual workflow shown in the project overview screenshot:
+
+- video upload and a large drag-to-select preview on the left;
+- region coordinates, ProPainter/output paths, preflight and the primary processing action on the right;
+- advanced temporal, scene, optical-flow, alpha and ProPainter controls in a collapsible section;
+- processed-video preview and quality-report download below the processing controls.
+
+An **About** tab gives a short workflow summary without duplicating the detailed processing documentation.
 
 ## Available controls
 
 - upload and preview the input video;
-- select a rectangular watermark region directly on a preview frame;
+- drag, move and resize a rectangular watermark region directly on a preview frame;
 - configure the local ProPainter directory;
 - choose an output directory;
 - use a per-frame mask directory or the pipeline's region mask;
