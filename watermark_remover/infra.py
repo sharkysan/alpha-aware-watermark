@@ -45,6 +45,7 @@ class ProPainterAdapter:
         ref_stride: int,
         resize_ratio: float,
         fp16: bool,
+        python_executable: Path | None = None,
     ) -> None:
         self.repo_dir = repo_dir
         self.runner = runner
@@ -52,15 +53,24 @@ class ProPainterAdapter:
         self.ref_stride = ref_stride
         self.resize_ratio = resize_ratio
         self.fp16 = fp16
+        self.python_executable = python_executable
 
     @property
     def inference_script(self) -> Path:
         return self.repo_dir / "inference_propainter.py"
 
+    @property
+    def resolved_python_executable(self) -> str:
+        return str(self.python_executable) if self.python_executable is not None else sys.executable
+
     def validate(self) -> None:
         if not self.inference_script.exists():
             raise FileNotFoundError(
                 f"Could not find ProPainter inference script: {self.inference_script}"
+            )
+        if self.python_executable is not None and not self.python_executable.is_file():
+            raise FileNotFoundError(
+                f"Could not find ProPainter Python executable: {self.python_executable}"
             )
 
     def inpaint(self, frames_dir: Path, masks_dir: Path, output_dir: Path) -> Path:
@@ -71,7 +81,7 @@ class ProPainterAdapter:
         before = self._snapshot(results_dir)
 
         cmd = [
-            sys.executable,
+            self.resolved_python_executable,
             str(self.inference_script),
             "--video",
             str(frames_dir),
