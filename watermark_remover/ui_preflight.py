@@ -90,19 +90,27 @@ def build_ui_preflight_report(
         issues.append("FFmpeg is not available on PATH.")
 
     painter_path = Path(propainter_dir).expanduser() if propainter_dir else None
-    painter_ready = painter_path is not None and painter_path.is_dir()
-    rows.append(("ProPainter", str(painter_path) if painter_ready else "Directory not found"))
-    if not painter_ready:
+    if painter_path is None or not painter_path.is_dir():
+        rows.append(("ProPainter", "Directory not found"))
         issues.append("ProPainter directory is missing or invalid.")
-    elif not (painter_path / "inference_propainter.py").is_file():
-        issues.append("ProPainter inference_propainter.py was not found in the selected directory.")
+        validated_painter_path: Path | None = None
+    else:
+        rows.append(("ProPainter", str(painter_path)))
+        validated_painter_path = painter_path
+        if not (validated_painter_path / "inference_propainter.py").is_file():
+            issues.append(
+                "ProPainter inference_propainter.py was not found in the selected directory."
+            )
 
     python_path = _resolve_python(propainter_python)
     rows.append(("ProPainter Python", str(python_path)))
     if not python_path.is_file():
         issues.append("ProPainter Python executable is missing or invalid.")
-    elif painter_ready:
-        environment_result = _check_propainter_environment(python_path, painter_path)
+    elif validated_painter_path is not None:
+        environment_result = _check_propainter_environment(
+            python_path,
+            validated_painter_path,
+        )
         rows.append(("ProPainter environment", environment_result[0]))
         if environment_result[1] is not None:
             issues.append(environment_result[1])
