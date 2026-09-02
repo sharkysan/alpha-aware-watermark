@@ -12,9 +12,7 @@ from .progress import PipelineProgress, ProgressReporter
 from .ui_preflight import build_ui_preflight_report
 
 APP_CSS = """
-.gradio-container {
-    max-width: 1440px !important;
-}
+.gradio-container { max-width: 1440px !important; }
 .hero-card {
     border: 1px solid var(--border-color-primary);
     border-radius: 18px;
@@ -22,18 +20,9 @@ APP_CSS = """
     margin-bottom: 14px;
     background: var(--background-fill-secondary);
 }
-.hero-card h1 {
-    margin: 0 0 6px 0;
-}
-.hero-subtitle {
-    opacity: 0.78;
-    margin-bottom: 10px;
-}
-.chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
+.hero-card h1 { margin: 0 0 6px 0; }
+.hero-subtitle { opacity: 0.78; margin-bottom: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
     border: 1px solid var(--border-color-primary);
     border-radius: 999px;
@@ -47,25 +36,18 @@ APP_CSS = """
     padding: 14px;
     background: var(--background-fill-secondary);
 }
-#watermark-selector {
-    min-height: 520px;
-}
-#watermark-selector > div {
-    border-radius: 14px;
-    overflow: hidden;
-}
-.selector-help {
-    font-size: 0.9rem;
-    opacity: 0.78;
-}
-.primary-action button {
-    min-height: 48px;
-    font-weight: 650;
-}
-.compact-status {
-    min-height: 42px;
-}
+#watermark-selector { min-height: 520px; }
+#watermark-selector > div { border-radius: 14px; overflow: hidden; }
+.selector-help { font-size: 0.9rem; opacity: 0.78; }
+.primary-action button { min-height: 48px; font-weight: 650; }
+.compact-status { min-height: 42px; }
 """
+
+
+def _optional_path(value: str | Path | None) -> Path | None:
+    if value is None or not str(value).strip():
+        return None
+    return Path(value).expanduser()
 
 
 def build_pipeline_config(
@@ -91,21 +73,14 @@ def build_pipeline_config(
     resize_ratio: float = 1.0,
     fp16: bool = False,
     save_debug: bool = False,
+    propainter_python: str | Path | None = None,
 ) -> PipelineConfig:
     """Translate UI values into the same PipelineConfig used by the CLI."""
     input_path = Path(input_video).expanduser()
     propainter_path = Path(propainter_dir).expanduser()
-    destination = (
-        Path(output_dir).expanduser()
-        if output_dir is not None and str(output_dir).strip()
-        else input_path.parent
-    )
+    destination = _optional_path(output_dir) or input_path.parent
     output_path = destination / f"{input_path.stem}_alpha_clean.mp4"
     report_path = destination / f"{input_path.stem}_alpha_quality.csv"
-
-    resolved_mask_dir = None
-    if mask_dir is not None and str(mask_dir).strip():
-        resolved_mask_dir = Path(mask_dir).expanduser()
 
     region = None
     if custom_region:
@@ -116,7 +91,8 @@ def build_pipeline_config(
         propainter_dir=propainter_path,
         output_path=output_path,
         report_path=report_path,
-        mask_dir=resolved_mask_dir,
+        propainter_python=_optional_path(propainter_python),
+        mask_dir=_optional_path(mask_dir),
         region=region,
         temporal_radius=int(temporal_radius),
         chunk_size=int(chunk_size),
@@ -244,7 +220,6 @@ def region_from_annotation(annotation: dict[str, Any] | None) -> Region | None:
     boxes = annotation.get("boxes") or []
     if not boxes:
         return None
-
     box = boxes[0]
     xmin = int(round(float(box["xmin"])))
     ymin = int(round(float(box["ymin"])))
@@ -263,6 +238,7 @@ def region_from_annotation(annotation: dict[str, Any] | None) -> Region | None:
 def run_ui_preflight(
     input_video: str | Path | None,
     propainter_dir: str | Path | None,
+    propainter_python: str | Path | None,
     output_dir: str | Path | None,
     save_debug: bool,
 ) -> str:
@@ -271,6 +247,7 @@ def run_ui_preflight(
         input_video,
         propainter_dir,
         output_dir,
+        propainter_python=propainter_python,
         save_debug=save_debug,
     ).markdown
 
@@ -298,6 +275,7 @@ def process_video(
     resize_ratio: float = 1.0,
     fp16: bool = False,
     save_debug: bool = False,
+    propainter_python: str | Path | None = None,
     progress_reporter: ProgressReporter | None = None,
 ) -> tuple[str, str, str]:
     """Run one UI request and return video path, report path, and status text."""
@@ -324,6 +302,7 @@ def process_video(
         resize_ratio=resize_ratio,
         fp16=fp16,
         save_debug=save_debug,
+        propainter_python=propainter_python,
     )
     config.output_path.parent.mkdir(parents=True, exist_ok=True)
     result = WatermarkRemovalPipeline(
@@ -387,6 +366,7 @@ def build_app() -> Any:
     def process_with_progress(
         input_video: str | Path,
         propainter_dir: str | Path,
+        propainter_python: str | Path | None,
         output_dir: str | Path | None,
         mask_dir: str | Path | None,
         custom_region: bool,
@@ -413,28 +393,29 @@ def build_app() -> Any:
             progress(update.fraction, desc=update.message)
 
         return process_video(
-            input_video,
-            propainter_dir,
-            output_dir,
-            mask_dir,
-            custom_region,
-            x,
-            y,
-            width,
-            height,
-            temporal_radius,
-            chunk_size,
-            scene_threshold,
-            min_scene_length,
-            motion_compensation,
-            alpha_inpaint_threshold,
-            analytic_confidence_min,
-            residual_dilate,
-            neighbor_length,
-            ref_stride,
-            resize_ratio,
-            fp16,
-            save_debug,
+            input_video=input_video,
+            propainter_dir=propainter_dir,
+            output_dir=output_dir,
+            mask_dir=mask_dir,
+            custom_region=custom_region,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            temporal_radius=temporal_radius,
+            chunk_size=chunk_size,
+            scene_threshold=scene_threshold,
+            min_scene_length=min_scene_length,
+            motion_compensation=motion_compensation,
+            alpha_inpaint_threshold=alpha_inpaint_threshold,
+            analytic_confidence_min=analytic_confidence_min,
+            residual_dilate=residual_dilate,
+            neighbor_length=neighbor_length,
+            ref_stride=ref_stride,
+            resize_ratio=resize_ratio,
+            fp16=fp16,
+            save_debug=save_debug,
+            propainter_python=propainter_python,
             progress_reporter=report,
         )
 
@@ -511,6 +492,17 @@ def build_app() -> Any:
                             label="ProPainter directory",
                             placeholder=r"C:\Work\ProPainter",
                         )
+                        propainter_python = gr.Textbox(
+                            label="ProPainter Python executable",
+                            placeholder=(
+                                r"C:\Users\you\miniconda3\envs\propainter\python.exe "
+                                "(blank = UI Python)"
+                            ),
+                            info=(
+                                "Use the Python from the Conda/venv where ProPainter dependencies "
+                                "are installed."
+                            ),
+                        )
                         output_dir = gr.Textbox(
                             label="Output directory (optional)",
                             placeholder="Defaults to the input video's directory",
@@ -523,7 +515,7 @@ def build_app() -> Any:
                         gr.Markdown("### 3. Preflight")
                         preflight_button = gr.Button("Run preflight")
                         preflight_status = gr.Markdown(
-                            "Upload a video and configure ProPainter, then run preflight.",
+                            "Preflight checks video, FFmpeg, disk space, ProPainter, and its Python environment.",
                             elem_classes=["compact-status"],
                         )
                         process_button = gr.Button(
@@ -595,12 +587,14 @@ def build_app() -> Any:
                     ### Workflow
                     1. Upload a video.
                     2. Drag a rectangle around the watermark in the preview.
-                    3. Configure the ProPainter directory and optional output paths.
-                    4. Run preflight, then start processing.
+                    3. Select the ProPainter directory and, when using a separate Conda/venv,
+                       its Python executable.
+                    4. Run preflight. It verifies the selected Python can import the core
+                       ProPainter runtime dependencies before processing starts.
+                    5. Start processing.
 
-                    The selector uses one editable bounding box. The numeric X/Y/Width/Height fields remain
-                    available for exact manual adjustment. Processing stays local; the UI delegates to the same
-                    `PipelineConfig` and `WatermarkRemovalPipeline` used by the CLI.
+                    Processing stays local; the UI delegates to the same `PipelineConfig` and
+                    `WatermarkRemovalPipeline` used by the CLI.
                     """
                 )
 
@@ -624,7 +618,13 @@ def build_app() -> Any:
         )
         preflight_button.click(
             fn=run_ui_preflight,
-            inputs=[input_video, propainter_dir, output_dir, save_debug],
+            inputs=[
+                input_video,
+                propainter_dir,
+                propainter_python,
+                output_dir,
+                save_debug,
+            ],
             outputs=[preflight_status],
         )
         process_button.click(
@@ -632,6 +632,7 @@ def build_app() -> Any:
             inputs=[
                 input_video,
                 propainter_dir,
+                propainter_python,
                 output_dir,
                 mask_dir,
                 custom_region,
