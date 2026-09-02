@@ -42,6 +42,41 @@ def extract_frames(
     return frames
 
 
+def encode_frames(
+    frames_dir: Path,
+    output_path: Path,
+    fps: float,
+    runner: CommandRunner,
+    *,
+    pattern: str = "%06d.png",
+    start_number: int = 0,
+) -> Path:
+    """Encode an image sequence into an H.264 video at the source frame rate."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    runner.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-framerate",
+            f"{fps:.8f}",
+            "-start_number",
+            str(start_number),
+            "-i",
+            str(frames_dir / pattern),
+            "-c:v",
+            "libx264",
+            "-crf",
+            "18",
+            "-preset",
+            "medium",
+            "-pix_fmt",
+            "yuv420p",
+            str(output_path),
+        ]
+    )
+    return output_path
+
+
 def mux_original_audio(
     generated_video: Path,
     original_video: Path,
