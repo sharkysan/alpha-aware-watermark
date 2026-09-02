@@ -55,6 +55,7 @@ class PipelineConfig:
     ref_stride: int = 10
     resize_ratio: float = 1.0
     fp16: bool = False
+    roi_padding: int = 32
     save_debug: bool = False
     resume: bool = False
     checkpoint_dir: Path | None = None
@@ -85,5 +86,7 @@ class PipelineConfig:
             raise ValueError("ref_stride must be > 0")
         if self.resize_ratio <= 0:
             raise ValueError("resize_ratio must be > 0")
+        if self.roi_padding < 0:
+            raise ValueError("roi_padding must be >= 0")
         if self.checkpoint_dir is not None and not self.resume:
             raise ValueError("checkpoint_dir requires resume=True")

@@ -8,6 +8,7 @@ import numpy as np
 
 from .models import PipelineConfig, Region
 from .pipeline import WatermarkRemovalPipeline
+from .presets import preset_values
 from .progress import PipelineProgress, ProgressReporter
 from .ui_preflight import build_ui_preflight_report
 
@@ -72,6 +73,7 @@ def build_pipeline_config(
     ref_stride: float = 10,
     resize_ratio: float = 1.0,
     fp16: bool = False,
+    roi_padding: float = 32,
     save_debug: bool = False,
     propainter_python: str | Path | None = None,
 ) -> PipelineConfig:
@@ -106,6 +108,7 @@ def build_pipeline_config(
         ref_stride=int(ref_stride),
         resize_ratio=float(resize_ratio),
         fp16=fp16,
+        roi_padding=int(roi_padding),
         save_debug=save_debug,
     )
     config.validate()
@@ -274,6 +277,7 @@ def process_video(
     ref_stride: float = 10,
     resize_ratio: float = 1.0,
     fp16: bool = False,
+    roi_padding: float = 32,
     save_debug: bool = False,
     propainter_python: str | Path | None = None,
     progress_reporter: ProgressReporter | None = None,
@@ -301,6 +305,7 @@ def process_video(
         ref_stride=ref_stride,
         resize_ratio=resize_ratio,
         fp16=fp16,
+        roi_padding=roi_padding,
         save_debug=save_debug,
         propainter_python=propainter_python,
     )
@@ -386,6 +391,7 @@ def build_app() -> Any:
         ref_stride: float,
         resize_ratio: float,
         fp16: bool,
+        roi_padding: float,
         save_debug: bool,
         progress: Any = gr.Progress(),
     ) -> tuple[str, str, str]:
@@ -414,6 +420,7 @@ def build_app() -> Any:
             ref_stride=ref_stride,
             resize_ratio=resize_ratio,
             fp16=fp16,
+            roi_padding=roi_padding,
             save_debug=save_debug,
             propainter_python=propainter_python,
             progress_reporter=report,
@@ -436,6 +443,7 @@ def build_app() -> Any:
                 <span class="chip">Scene-aware</span>
                 <span class="chip">Optical flow</span>
                 <span class="chip">ProPainter</span>
+                <span class="chip">ROI accelerated</span>
                 <span class="chip">Local processing</span>
               </div>
             </div>
@@ -529,6 +537,12 @@ def build_app() -> Any:
                         )
 
                 with gr.Accordion("Processing settings", open=False):
+                    processing_preset = gr.Radio(
+                        choices=["Fast", "Balanced", "High Quality"],
+                        value="Balanced",
+                        label="Processing preset",
+                        info="Fast prioritizes throughput; High Quality preserves maximum detail.",
+                    )
                     with gr.Row():
                         temporal_radius = gr.Slider(
                             0, 10, value=2, step=1, label="Temporal radius"
@@ -564,16 +578,24 @@ def build_app() -> Any:
                         )
                     with gr.Row():
                         neighbor_length = gr.Slider(
-                            1, 30, value=10, step=1, label="ProPainter neighbor length"
+                            1, 30, value=8, step=1, label="ProPainter neighbor length"
                         )
                         ref_stride = gr.Slider(
                             1, 30, value=10, step=1, label="ProPainter reference stride"
                         )
                         resize_ratio = gr.Slider(
-                            0.25, 1.0, value=1.0, step=0.05, label="Resize ratio"
+                            0.25, 1.0, value=0.75, step=0.05, label="Resize ratio"
                         )
                     with gr.Row():
-                        fp16 = gr.Checkbox(label="Use FP16", value=False)
+                        fp16 = gr.Checkbox(label="Use FP16", value=True)
+                        roi_padding = gr.Slider(
+                            0,
+                            128,
+                            value=32,
+                            step=4,
+                            label="ROI padding",
+                            info="Extra pixels around residual masks sent to ProPainter.",
+                        )
                         save_debug = gr.Checkbox(label="Save debug frames", value=False)
 
                 gr.Markdown("### Result")
@@ -589,12 +611,12 @@ def build_app() -> Any:
                     2. Drag a rectangle around the watermark in the preview.
                     3. Select the ProPainter directory and, when using a separate Conda/venv,
                        its Python executable.
-                    4. Run preflight. It verifies the selected Python can import the core
-                       ProPainter runtime dependencies before processing starts.
-                    5. Start processing.
+                    4. Pick Fast, Balanced, or High Quality and adjust individual settings if needed.
+                    5. Run preflight, then start processing.
 
-                    Processing stays local; the UI delegates to the same `PipelineConfig` and
-                    `WatermarkRemovalPipeline` used by the CLI.
+                    ProPainter receives only the padded union of residual inpainting masks instead of
+                    full-resolution frames. The ROI result is composited back into the analytic frames
+                    before the original audio is restored.
                     """
                 )
 
@@ -615,6 +637,20 @@ def build_app() -> Any:
             fn=sync_region_from_annotation,
             inputs=[region_selector],
             outputs=[x, y, width, height, custom_region, selector_status],
+        )
+        processing_preset.change(
+            fn=preset_values,
+            inputs=[processing_preset],
+            outputs=[
+                temporal_radius,
+                chunk_size,
+                motion_compensation,
+                neighbor_length,
+                ref_stride,
+                resize_ratio,
+                fp16,
+                roi_padding,
+            ],
         )
         preflight_button.click(
             fn=run_ui_preflight,
@@ -652,6 +688,7 @@ def build_app() -> Any:
                 ref_stride,
                 resize_ratio,
                 fp16,
+                roi_padding,
                 save_debug,
             ],
             outputs=[result_video, report_file, status],
