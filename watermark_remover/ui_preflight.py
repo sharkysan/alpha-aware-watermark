@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +23,7 @@ def build_ui_preflight_report(
     propainter_dir: str | Path | None,
     output_dir: str | Path | None = None,
     *,
+    propainter_python: str | Path | None = None,
     save_debug: bool = False,
 ) -> UiPreflightReport:
     """Return a human-readable readiness report for one prospective UI run."""
@@ -87,10 +90,30 @@ def build_ui_preflight_report(
         issues.append("FFmpeg is not available on PATH.")
 
     painter_path = Path(propainter_dir).expanduser() if propainter_dir else None
-    painter_ready = painter_path is not None and painter_path.is_dir()
-    rows.append(("ProPainter", str(painter_path) if painter_ready else "Directory not found"))
-    if not painter_ready:
+    if painter_path is None or not painter_path.is_dir():
+        rows.append(("ProPainter", "Directory not found"))
         issues.append("ProPainter directory is missing or invalid.")
+        validated_painter_path: Path | None = None
+    else:
+        rows.append(("ProPainter", str(painter_path)))
+        validated_painter_path = painter_path
+        if not (validated_painter_path / "inference_propainter.py").is_file():
+            issues.append(
+                "ProPainter inference_propainter.py was not found in the selected directory."
+            )
+
+    python_path = _resolve_python(propainter_python)
+    rows.append(("ProPainter Python", str(python_path)))
+    if not python_path.is_file():
+        issues.append("ProPainter Python executable is missing or invalid.")
+    elif validated_painter_path is not None:
+        environment_result = _check_propainter_environment(
+            python_path,
+            validated_painter_path,
+        )
+        rows.append(("ProPainter environment", environment_result[0]))
+        if environment_result[1] is not None:
+            issues.append(environment_result[1])
 
     ready = not issues
     title = "✅ Ready to process" if ready else "⚠️ Preflight needs attention"
@@ -99,6 +122,40 @@ def build_ui_preflight_report(
     if issues:
         lines.extend(["", "**Issues**", *[f"- {issue}" for issue in issues]])
     return UiPreflightReport(ready=ready, markdown="\n".join(lines))
+
+
+def _resolve_python(value: str | Path | None) -> Path:
+    if value is not None and str(value).strip():
+        return Path(value).expanduser()
+    return Path(sys.executable)
+
+
+def _check_propainter_environment(
+    python_path: Path,
+    propainter_dir: Path,
+) -> tuple[str, str | None]:
+    probe = (
+        "import sys, imageio, torch, torchvision, cv2, numpy; "
+        "print(sys.version.split()[0]); print(torch.__version__)"
+    )
+    try:
+        result = subprocess.run(
+            [str(python_path), "-c", probe],
+            cwd=propainter_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired) as exc:
+        stderr = getattr(exc, "stderr", None) or getattr(exc, "stdout", None) or str(exc)
+        detail = str(stderr).strip().splitlines()[-1] if str(stderr).strip() else str(exc)
+        return "Import check failed", f"ProPainter Python environment is not ready: {detail}"
+
+    values = result.stdout.strip().splitlines()
+    python_version = values[0] if values else "unknown"
+    torch_version = values[1] if len(values) > 1 else "unknown"
+    return f"Python {python_version} · torch {torch_version} · imports OK", None
 
 
 def _nearest_existing_path(path: Path) -> Path:

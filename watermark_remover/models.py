@@ -40,6 +40,7 @@ class PipelineConfig:
     propainter_dir: Path
     output_path: Path
     report_path: Path
+    propainter_python: Path | None = None
     mask_dir: Path | None = None
     region: Region | None = None
     temporal_radius: int = 2
@@ -59,6 +60,11 @@ class PipelineConfig:
     checkpoint_dir: Path | None = None
 
     def validate(self) -> None:
+        if self.propainter_python is not None and not self.propainter_python.is_file():
+            raise ValueError(
+                f"propainter_python must point to an existing executable file: "
+                f"{self.propainter_python}"
+            )
         if self.temporal_radius < 0:
             raise ValueError("temporal_radius must be >= 0")
         if self.chunk_size <= 0:

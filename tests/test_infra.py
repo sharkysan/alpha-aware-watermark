@@ -33,6 +33,28 @@ def test_propainter_builds_expected_command(tmp_path: Path):
     assert adapter.inference_script.exists()
 
 
+def test_propainter_uses_selected_python(tmp_path: Path):
+    repo = tmp_path / "ProPainter"
+    repo.mkdir()
+    (repo / "inference_propainter.py").write_text("# stub", encoding="utf-8")
+    python = tmp_path / "env" / "python.exe"
+    python.parent.mkdir()
+    python.write_bytes(b"python")
+
+    adapter = ProPainterAdapter(
+        repo_dir=repo,
+        runner=FakeRunner(),
+        neighbor_length=10,
+        ref_stride=10,
+        resize_ratio=1.0,
+        fp16=False,
+        python_executable=python,
+    )
+
+    adapter.validate()
+    assert adapter.resolved_python_executable == str(python)
+
+
 def test_subprocess_runner_surfaces_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*args, **kwargs):
         raise subprocess.CalledProcessError(

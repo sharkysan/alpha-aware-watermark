@@ -11,6 +11,44 @@ from .pipeline import WatermarkRemovalPipeline
 from .progress import PipelineProgress, ProgressReporter
 from .ui_preflight import build_ui_preflight_report
 
+APP_CSS = """
+.gradio-container { max-width: 1440px !important; }
+.hero-card {
+    border: 1px solid var(--border-color-primary);
+    border-radius: 18px;
+    padding: 20px 24px;
+    margin-bottom: 14px;
+    background: var(--background-fill-secondary);
+}
+.hero-card h1 { margin: 0 0 6px 0; }
+.hero-subtitle { opacity: 0.78; margin-bottom: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+    border: 1px solid var(--border-color-primary);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.82rem;
+    background: var(--background-fill-primary);
+}
+.panel-card {
+    border: 1px solid var(--border-color-primary);
+    border-radius: 16px;
+    padding: 14px;
+    background: var(--background-fill-secondary);
+}
+#watermark-selector { min-height: 520px; }
+#watermark-selector > div { border-radius: 14px; overflow: hidden; }
+.selector-help { font-size: 0.9rem; opacity: 0.78; }
+.primary-action button { min-height: 48px; font-weight: 650; }
+.compact-status { min-height: 42px; }
+"""
+
+
+def _optional_path(value: str | Path | None) -> Path | None:
+    if value is None or not str(value).strip():
+        return None
+    return Path(value).expanduser()
+
 
 def build_pipeline_config(
     input_video: str | Path,
@@ -35,21 +73,14 @@ def build_pipeline_config(
     resize_ratio: float = 1.0,
     fp16: bool = False,
     save_debug: bool = False,
+    propainter_python: str | Path | None = None,
 ) -> PipelineConfig:
     """Translate UI values into the same PipelineConfig used by the CLI."""
     input_path = Path(input_video).expanduser()
     propainter_path = Path(propainter_dir).expanduser()
-    destination = (
-        Path(output_dir).expanduser()
-        if output_dir is not None and str(output_dir).strip()
-        else input_path.parent
-    )
+    destination = _optional_path(output_dir) or input_path.parent
     output_path = destination / f"{input_path.stem}_alpha_clean.mp4"
     report_path = destination / f"{input_path.stem}_alpha_quality.csv"
-
-    resolved_mask_dir = None
-    if mask_dir is not None and str(mask_dir).strip():
-        resolved_mask_dir = Path(mask_dir).expanduser()
 
     region = None
     if custom_region:
@@ -60,7 +91,8 @@ def build_pipeline_config(
         propainter_dir=propainter_path,
         output_path=output_path,
         report_path=report_path,
-        mask_dir=resolved_mask_dir,
+        propainter_python=_optional_path(propainter_python),
+        mask_dir=_optional_path(mask_dir),
         region=region,
         temporal_radius=int(temporal_radius),
         chunk_size=int(chunk_size),
@@ -122,7 +154,7 @@ def update_region_selection(
     points: list[list[int]] | None,
     point: tuple[int, int],
 ) -> tuple[list[list[int]], float, float, float, float, bool, np.ndarray, str]:
-    """Apply one preview click and return updated region controls/overlay."""
+    """Legacy two-click region helper retained for API compatibility and tests."""
     if frame is None:
         raise ValueError("Upload a video before selecting a watermark region")
     if frame.ndim != 3 or frame.shape[2] != 3:
@@ -181,9 +213,32 @@ def update_region_selection(
     )
 
 
+def region_from_annotation(annotation: dict[str, Any] | None) -> Region | None:
+    """Convert the drag-selector's first bounding box into a pipeline Region."""
+    if not annotation:
+        return None
+    boxes = annotation.get("boxes") or []
+    if not boxes:
+        return None
+    box = boxes[0]
+    xmin = round(float(box["xmin"]))
+    ymin = round(float(box["ymin"]))
+    xmax = round(float(box["xmax"]))
+    ymax = round(float(box["ymax"]))
+    left, right = sorted((xmin, xmax))
+    top, bottom = sorted((ymin, ymax))
+    return Region(
+        x=max(0, left),
+        y=max(0, top),
+        width=max(1, right - left),
+        height=max(1, bottom - top),
+    )
+
+
 def run_ui_preflight(
     input_video: str | Path | None,
     propainter_dir: str | Path | None,
+    propainter_python: str | Path | None,
     output_dir: str | Path | None,
     save_debug: bool,
 ) -> str:
@@ -192,6 +247,7 @@ def run_ui_preflight(
         input_video,
         propainter_dir,
         output_dir,
+        propainter_python=propainter_python,
         save_debug=save_debug,
     ).markdown
 
@@ -219,6 +275,7 @@ def process_video(
     resize_ratio: float = 1.0,
     fp16: bool = False,
     save_debug: bool = False,
+    propainter_python: str | Path | None = None,
     progress_reporter: ProgressReporter | None = None,
 ) -> tuple[str, str, str]:
     """Run one UI request and return video path, report path, and status text."""
@@ -245,6 +302,7 @@ def process_video(
         resize_ratio=resize_ratio,
         fp16=fp16,
         save_debug=save_debug,
+        propainter_python=propainter_python,
     )
     config.output_path.parent.mkdir(parents=True, exist_ok=True)
     result = WatermarkRemovalPipeline(
@@ -258,34 +316,57 @@ def build_app() -> Any:
     """Build the optional local Gradio application."""
     try:
         import gradio as gr  # type: ignore[import-not-found]
+        from gradio_image_annotation import image_annotator  # type: ignore[import-not-found]
     except ImportError as exc:
         raise RuntimeError(
             'Gradio UI dependencies are not installed. Run: pip install -e ".[ui]"'
         ) from exc
 
-    def load_preview(video: str | None) -> tuple[np.ndarray | None, list[list[int]], str]:
-        return extract_preview_frame(video), [], "Click two opposite corners of the watermark."
+    def load_preview(
+        video: str | None,
+    ) -> tuple[dict[str, Any] | None, float, float, float, float, bool, str]:
+        frame = extract_preview_frame(video)
+        if frame is None:
+            return None, 0.0, 0.0, 1.0, 1.0, False, "Upload a video to begin."
+        return (
+            {"image": frame, "boxes": []},
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            False,
+            "Drag a rectangle around the watermark. You can move or resize it afterwards.",
+        )
 
-    def select_region(
-        frame: np.ndarray | None,
-        points: list[list[int]] | None,
-        evt: Any,
-    ) -> tuple[list[list[int]], float, float, float, float, bool, np.ndarray, str]:
-        if evt is None:
-            raise RuntimeError("Gradio did not provide SelectData for the image click")
-        index = evt.index
-        if not isinstance(index, (tuple, list)) or len(index) < 2:
-            raise ValueError("Could not determine the selected image coordinates")
-        return update_region_selection(frame, points, (int(index[0]), int(index[1])))
-
-    # Gradio detects event-data parameters from the runtime annotation. Because
-    # Gradio is an optional dependency imported inside build_app(), bind the
-    # concrete type here instead of importing Gradio at module import time.
-    select_region.__annotations__["evt"] = gr.SelectData
+    def sync_region_from_annotation(
+        annotation: dict[str, Any] | None,
+    ) -> tuple[float, float, float, float, bool, str]:
+        region = region_from_annotation(annotation)
+        if region is None:
+            return (
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                False,
+                "Drag a rectangle around the watermark to select the processing region.",
+            )
+        return (
+            float(region.x),
+            float(region.y),
+            float(region.width),
+            float(region.height),
+            True,
+            (
+                f"Selected region: x={region.x}, y={region.y}, "
+                f"width={region.width}, height={region.height}."
+            ),
+        )
 
     def process_with_progress(
         input_video: str | Path,
         propainter_dir: str | Path,
+        propainter_python: str | Path | None,
         output_dir: str | Path | None,
         mask_dir: str | Path | None,
         custom_region: bool,
@@ -312,146 +393,238 @@ def build_app() -> Any:
             progress(update.fraction, desc=update.message)
 
         return process_video(
-            input_video,
-            propainter_dir,
-            output_dir,
-            mask_dir,
-            custom_region,
-            x,
-            y,
-            width,
-            height,
-            temporal_radius,
-            chunk_size,
-            scene_threshold,
-            min_scene_length,
-            motion_compensation,
-            alpha_inpaint_threshold,
-            analytic_confidence_min,
-            residual_dilate,
-            neighbor_length,
-            ref_stride,
-            resize_ratio,
-            fp16,
-            save_debug,
+            input_video=input_video,
+            propainter_dir=propainter_dir,
+            output_dir=output_dir,
+            mask_dir=mask_dir,
+            custom_region=custom_region,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            temporal_radius=temporal_radius,
+            chunk_size=chunk_size,
+            scene_threshold=scene_threshold,
+            min_scene_length=min_scene_length,
+            motion_compensation=motion_compensation,
+            alpha_inpaint_threshold=alpha_inpaint_threshold,
+            analytic_confidence_min=analytic_confidence_min,
+            residual_dilate=residual_dilate,
+            neighbor_length=neighbor_length,
+            ref_stride=ref_stride,
+            resize_ratio=resize_ratio,
+            fp16=fp16,
+            save_debug=save_debug,
+            propainter_python=propainter_python,
             progress_reporter=report,
         )
 
-    with gr.Blocks(title="Alpha-Aware Watermark Remover") as app:
-        gr.Markdown(
-            "# Alpha-Aware Watermark Remover\n"
-            "Local UI for the existing scene-aware, temporal processing pipeline."
+    with gr.Blocks(
+        title="Alpha-Aware Watermark",
+        css=APP_CSS,
+        theme=gr.themes.Soft(),
+    ) as app:
+        gr.HTML(
+            """
+            <div class="hero-card">
+              <h1>Alpha-Aware Watermark</h1>
+              <div class="hero-subtitle">
+                Scene-aware temporal watermark removal with analytic recovery and residual AI inpainting.
+              </div>
+              <div class="chips">
+                <span class="chip">Alpha-aware</span>
+                <span class="chip">Scene-aware</span>
+                <span class="chip">Optical flow</span>
+                <span class="chip">ProPainter</span>
+                <span class="chip">Local processing</span>
+              </div>
+            </div>
+            """
         )
-        region_points = gr.State([])
 
-        with gr.Row():
-            with gr.Column(scale=2):
-                input_video = gr.Video(label="Input video", sources=["upload"])
-                preview_image = gr.Image(
-                    label="Watermark region selector — click two opposite corners",
-                    type="numpy",
-                )
-                selector_status = gr.Markdown("Upload a video to select the watermark region.")
-                propainter_dir = gr.Textbox(
-                    label="ProPainter directory",
-                    placeholder="/path/to/ProPainter",
-                )
-                output_dir = gr.Textbox(
-                    label="Output directory (optional)",
-                    placeholder="Defaults to the input video's directory",
-                )
-                mask_dir = gr.Textbox(
-                    label="Per-frame mask directory (optional)",
-                    placeholder="Leave empty to use a region mask",
-                )
+        with gr.Tabs():
+            with gr.Tab("Process"):
+                with gr.Row(equal_height=False):
+                    with gr.Column(scale=7, elem_classes=["panel-card"]):
+                        gr.Markdown("### 1. Video and watermark region")
+                        input_video = gr.Video(label="Input video", sources=["upload"])
+                        gr.Markdown(
+                            "**Drag directly on the preview to draw the watermark rectangle.** "
+                            "Drag the box to move it or use its handles to resize it.",
+                            elem_classes=["selector-help"],
+                        )
+                        region_selector = image_annotator(
+                            value=None,
+                            image_type="numpy",
+                            single_box=True,
+                            disable_edit_boxes=True,
+                            show_download_button=False,
+                            show_clear_button=False,
+                            show_remove_button=True,
+                            boxes_alpha=0.18,
+                            box_thickness=2,
+                            box_selected_thickness=3,
+                            box_min_size=4,
+                            height=520,
+                            label="Watermark region",
+                            elem_id="watermark-selector",
+                        )
+                        selector_status = gr.Markdown(
+                            "Upload a video to select the watermark region.",
+                            elem_classes=["compact-status"],
+                        )
 
-            with gr.Column(scale=1):
-                gr.Markdown("### Watermark region")
-                custom_region = gr.Checkbox(
-                    label="Use custom region",
-                    value=False,
-                    info="Two preview clicks enable this automatically; manual values still work.",
-                )
+                    with gr.Column(scale=4, elem_classes=["panel-card"]):
+                        gr.Markdown("### 2. Region and runtime")
+                        custom_region = gr.Checkbox(
+                            label="Use custom region",
+                            value=False,
+                            info="Enabled automatically when a rectangle is drawn.",
+                        )
+                        with gr.Row():
+                            x = gr.Number(label="X", value=0, precision=0)
+                            y = gr.Number(label="Y", value=0, precision=0)
+                        with gr.Row():
+                            width = gr.Number(label="Width", value=1, precision=0)
+                            height = gr.Number(label="Height", value=1, precision=0)
+
+                        propainter_dir = gr.Textbox(
+                            label="ProPainter directory",
+                            placeholder=r"C:\Work\ProPainter",
+                        )
+                        propainter_python = gr.Textbox(
+                            label="ProPainter Python executable",
+                            placeholder=(
+                                r"C:\Users\you\miniconda3\envs\propainter\python.exe "
+                                "(blank = UI Python)"
+                            ),
+                            info=(
+                                "Use the Python from the Conda/venv where ProPainter dependencies "
+                                "are installed."
+                            ),
+                        )
+                        output_dir = gr.Textbox(
+                            label="Output directory (optional)",
+                            placeholder="Defaults to the input video's directory",
+                        )
+                        mask_dir = gr.Textbox(
+                            label="Per-frame mask directory (optional)",
+                            placeholder="Leave empty to use the selected rectangle",
+                        )
+
+                        gr.Markdown("### 3. Preflight")
+                        preflight_button = gr.Button("Run preflight")
+                        preflight_status = gr.Markdown(
+                            "Preflight checks video, FFmpeg, disk space, ProPainter, and its Python environment.",
+                            elem_classes=["compact-status"],
+                        )
+                        process_button = gr.Button(
+                            "Remove watermark",
+                            variant="primary",
+                            elem_classes=["primary-action"],
+                        )
+                        status = gr.Markdown(
+                            "Ready. Processing progress appears while a run is active.",
+                            elem_classes=["compact-status"],
+                        )
+
+                with gr.Accordion("Processing settings", open=False):
+                    with gr.Row():
+                        temporal_radius = gr.Slider(
+                            0, 10, value=2, step=1, label="Temporal radius"
+                        )
+                        chunk_size = gr.Slider(1, 96, value=24, step=1, label="Chunk size")
+                        min_scene_length = gr.Slider(
+                            1, 120, value=10, step=1, label="Minimum scene length"
+                        )
+                    scene_threshold = gr.Slider(
+                        -1.0, 1.0, value=0.62, step=0.01, label="Scene-cut threshold"
+                    )
+                    motion_compensation = gr.Checkbox(
+                        label="Optical-flow motion compensation",
+                        value=True,
+                    )
+                    with gr.Row():
+                        alpha_inpaint_threshold = gr.Slider(
+                            0.0,
+                            1.0,
+                            value=0.55,
+                            step=0.01,
+                            label="Alpha inpaint threshold",
+                        )
+                        analytic_confidence_min = gr.Slider(
+                            0.0,
+                            1.0,
+                            value=0.28,
+                            step=0.01,
+                            label="Minimum analytic confidence",
+                        )
+                        residual_dilate = gr.Slider(
+                            0, 15, value=3, step=1, label="Residual dilation"
+                        )
+                    with gr.Row():
+                        neighbor_length = gr.Slider(
+                            1, 30, value=10, step=1, label="ProPainter neighbor length"
+                        )
+                        ref_stride = gr.Slider(
+                            1, 30, value=10, step=1, label="ProPainter reference stride"
+                        )
+                        resize_ratio = gr.Slider(
+                            0.25, 1.0, value=1.0, step=0.05, label="Resize ratio"
+                        )
+                    with gr.Row():
+                        fp16 = gr.Checkbox(label="Use FP16", value=False)
+                        save_debug = gr.Checkbox(label="Save debug frames", value=False)
+
+                gr.Markdown("### Result")
                 with gr.Row():
-                    x = gr.Number(label="X", value=0, precision=0)
-                    y = gr.Number(label="Y", value=0, precision=0)
-                with gr.Row():
-                    width = gr.Number(label="Width", value=200, precision=0)
-                    height = gr.Number(label="Height", value=100, precision=0)
+                    result_video = gr.Video(label="Processed video")
+                    report_file = gr.File(label="Quality report")
 
-        with gr.Accordion("Processing settings", open=False):
-            with gr.Row():
-                temporal_radius = gr.Slider(0, 10, value=2, step=1, label="Temporal radius")
-                chunk_size = gr.Slider(1, 96, value=24, step=1, label="Chunk size")
-                min_scene_length = gr.Slider(
-                    1, 120, value=10, step=1, label="Minimum scene length"
-                )
-            scene_threshold = gr.Slider(
-                -1.0, 1.0, value=0.62, step=0.01, label="Scene-cut threshold"
-            )
-            motion_compensation = gr.Checkbox(
-                label="Optical-flow motion compensation",
-                value=True,
-            )
-            with gr.Row():
-                alpha_inpaint_threshold = gr.Slider(
-                    0.0, 1.0, value=0.55, step=0.01, label="Alpha inpaint threshold"
-                )
-                analytic_confidence_min = gr.Slider(
-                    0.0, 1.0, value=0.28, step=0.01, label="Minimum analytic confidence"
-                )
-                residual_dilate = gr.Slider(
-                    0, 15, value=3, step=1, label="Residual dilation"
-                )
-            with gr.Row():
-                neighbor_length = gr.Slider(
-                    1, 30, value=10, step=1, label="ProPainter neighbor length"
-                )
-                ref_stride = gr.Slider(
-                    1, 30, value=10, step=1, label="ProPainter reference stride"
-                )
-                resize_ratio = gr.Slider(
-                    0.25, 1.0, value=1.0, step=0.05, label="Resize ratio"
-                )
-            with gr.Row():
-                fp16 = gr.Checkbox(label="Use FP16", value=False)
-                save_debug = gr.Checkbox(label="Save debug frames", value=False)
+            with gr.Tab("About"):
+                gr.Markdown(
+                    """
+                    ### Workflow
+                    1. Upload a video.
+                    2. Drag a rectangle around the watermark in the preview.
+                    3. Select the ProPainter directory and, when using a separate Conda/venv,
+                       its Python executable.
+                    4. Run preflight. It verifies the selected Python can import the core
+                       ProPainter runtime dependencies before processing starts.
+                    5. Start processing.
 
-        with gr.Accordion("Preflight", open=True):
-            preflight_button = gr.Button("Run preflight")
-            preflight_status = gr.Markdown(
-                "Upload a video and configure ProPainter, then run preflight."
-            )
-
-        process_button = gr.Button("Remove watermark", variant="primary")
-        status = gr.Markdown("Ready. Processing progress appears above while a run is active.")
-
-        with gr.Row():
-            result_video = gr.Video(label="Processed video")
-            report_file = gr.File(label="Quality report")
+                    Processing stays local; the UI delegates to the same `PipelineConfig` and
+                    `WatermarkRemovalPipeline` used by the CLI.
+                    """
+                )
 
         input_video.change(
             fn=load_preview,
             inputs=[input_video],
-            outputs=[preview_image, region_points, selector_status],
-        )
-        preview_image.select(
-            fn=select_region,
-            inputs=[preview_image, region_points],
             outputs=[
-                region_points,
+                region_selector,
                 x,
                 y,
                 width,
                 height,
                 custom_region,
-                preview_image,
                 selector_status,
             ],
         )
+        region_selector.change(
+            fn=sync_region_from_annotation,
+            inputs=[region_selector],
+            outputs=[x, y, width, height, custom_region, selector_status],
+        )
         preflight_button.click(
             fn=run_ui_preflight,
-            inputs=[input_video, propainter_dir, output_dir, save_debug],
+            inputs=[
+                input_video,
+                propainter_dir,
+                propainter_python,
+                output_dir,
+                save_debug,
+            ],
             outputs=[preflight_status],
         )
         process_button.click(
@@ -459,6 +632,7 @@ def build_app() -> Any:
             inputs=[
                 input_video,
                 propainter_dir,
+                propainter_python,
                 output_dir,
                 mask_dir,
                 custom_region,
