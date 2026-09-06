@@ -1,3 +1,5 @@
+import inspect
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -6,7 +8,9 @@ import pytest
 from watermark_remover.models import Region
 from watermark_remover.progress import PipelineProgress
 from watermark_remover.ui import (
+    APP_CSS,
     build_pipeline_config,
+    launch_app,
     process_video,
     region_from_annotation,
     region_from_points,
@@ -132,10 +136,103 @@ def test_process_video_delegates_progress_and_returns_artifacts(
         tmp_path / "ProPainter",
         output_dir=output_dir,
         progress_reporter=updates.append,
+        roi_padding=40,
     )
     assert output_dir.is_dir()
     assert Path(video) == output_dir / "clip_alpha_clean.mp4"
     assert Path(report) == output_dir / "clip_alpha_quality.csv"
     assert status == "Processing completed successfully."
     assert len(calls) == 1
+    assert calls[0].roi_padding == 40
     assert updates == [PipelineProgress(0.5, "processing", "Halfway")]
+
+
+class FakeUiError(Exception):
+    """Stand-in for gradio's Error type, which the UI raises for bad input."""
+
+
+def test_process_video_translates_invalid_roi_padding(tmp_path: Path):
+    with pytest.raises(FakeUiError, match="roi_padding"):
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            roi_padding=-1,
+            error_factory=FakeUiError,
+        )
+
+
+def test_process_video_translates_input_errors_via_error_factory(tmp_path: Path):
+    missing_python = tmp_path / "missing-python.exe"
+    with pytest.raises(FakeUiError) as excinfo:
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            propainter_python=missing_python,
+            error_factory=FakeUiError,
+        )
+    message = str(excinfo.value)
+    assert "propainter_python" in message
+    assert str(missing_python) in message
+    assert "preflight" in message.lower()
+
+
+def test_process_video_defaults_to_value_error_for_invalid_inputs(tmp_path: Path):
+    with pytest.raises(ValueError, match="propainter_python"):
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            propainter_python=tmp_path / "missing-python.exe",
+        )
+
+
+def test_process_video_does_not_translate_pipeline_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class ExplodingPipeline:
+        def __init__(self, config, progress_reporter=None):
+            self.config = config
+
+        def run(self):
+            raise ValueError("pipeline exploded")
+
+    monkeypatch.setattr("watermark_remover.ui.WatermarkRemovalPipeline", ExplodingPipeline)
+    with pytest.raises(ValueError, match="pipeline exploded"):
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            error_factory=FakeUiError,
+        )
+
+
+def test_build_app_does_not_warn_about_moved_blocks_parameters():
+    pytest.importorskip("gradio")
+    pytest.importorskip("gradio_image_annotation")
+    from watermark_remover.ui import build_app
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        build_app()
+
+    messages = [str(w.message) for w in caught]
+    moved = [m for m in messages if "moved from the Blocks constructor" in m]
+    assert moved == []
+
+
+def test_launch_app_supplies_css_and_theme_at_launch(monkeypatch: pytest.MonkeyPatch):
+    gr = pytest.importorskip("gradio")
+    recorded: dict[str, object] = {}
+
+    class FakeApp:
+        def launch(self, **kwargs: object) -> None:
+            recorded.update(kwargs)
+
+    monkeypatch.setattr("watermark_remover.ui.build_app", lambda: FakeApp())
+    launch_app(show_error=True)
+
+    assert recorded["css"] == APP_CSS
+    assert recorded["theme"] is not None
+    assert recorded["show_error"] is True
+    # Guard against forwarding options real Gradio would reject.
+    accepted = inspect.signature(gr.Blocks.launch).parameters
+    assert set(recorded) <= set(accepted)

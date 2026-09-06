@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -281,40 +282,53 @@ def process_video(
     save_debug: bool = False,
     propainter_python: str | Path | None = None,
     progress_reporter: ProgressReporter | None = None,
+    error_factory: Callable[[str], Exception] = ValueError,
 ) -> tuple[str, str, str]:
     """Run one UI request and return video path, report path, and status text."""
-    config = build_pipeline_config(
-        input_video=input_video,
-        propainter_dir=propainter_dir,
-        output_dir=output_dir,
-        mask_dir=mask_dir,
-        custom_region=custom_region,
-        x=x,
-        y=y,
-        width=width,
-        height=height,
-        temporal_radius=temporal_radius,
-        chunk_size=chunk_size,
-        scene_threshold=scene_threshold,
-        min_scene_length=min_scene_length,
-        motion_compensation=motion_compensation,
-        alpha_inpaint_threshold=alpha_inpaint_threshold,
-        analytic_confidence_min=analytic_confidence_min,
-        residual_dilate=residual_dilate,
-        neighbor_length=neighbor_length,
-        ref_stride=ref_stride,
-        resize_ratio=resize_ratio,
-        fp16=fp16,
-        roi_padding=roi_padding,
-        save_debug=save_debug,
-        propainter_python=propainter_python,
-    )
+    try:
+        config = build_pipeline_config(
+            input_video=input_video,
+            propainter_dir=propainter_dir,
+            output_dir=output_dir,
+            mask_dir=mask_dir,
+            custom_region=custom_region,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            temporal_radius=temporal_radius,
+            chunk_size=chunk_size,
+            scene_threshold=scene_threshold,
+            min_scene_length=min_scene_length,
+            motion_compensation=motion_compensation,
+            alpha_inpaint_threshold=alpha_inpaint_threshold,
+            analytic_confidence_min=analytic_confidence_min,
+            residual_dilate=residual_dilate,
+            neighbor_length=neighbor_length,
+            ref_stride=ref_stride,
+            resize_ratio=resize_ratio,
+            fp16=fp16,
+            roi_padding=roi_padding,
+            save_debug=save_debug,
+            propainter_python=propainter_python,
+        )
+    except ValueError as exc:
+        raise error_factory(_describe_input_error(exc)) from exc
     config.output_path.parent.mkdir(parents=True, exist_ok=True)
     result = WatermarkRemovalPipeline(
         config,
         progress_reporter=progress_reporter,
     ).run()
     return str(result), str(config.report_path), "Processing completed successfully."
+
+
+def _describe_input_error(error: ValueError) -> str:
+    """Render a configuration failure as actionable guidance for the UI."""
+    return (
+        f"Invalid input: {error}. "
+        "Correct the setting and run preflight to confirm the ProPainter "
+        "environment before processing."
+    )
 
 
 def build_app() -> Any:
@@ -424,13 +438,10 @@ def build_app() -> Any:
             save_debug=save_debug,
             propainter_python=propainter_python,
             progress_reporter=report,
+            error_factory=gr.Error,
         )
 
-    with gr.Blocks(
-        title="Alpha-Aware Watermark",
-        css=APP_CSS,
-        theme=gr.themes.Soft(),
-    ) as app:
+    with gr.Blocks(title="Alpha-Aware Watermark") as app:
         gr.HTML(
             """
             <div class="hero-card">
@@ -503,7 +514,7 @@ def build_app() -> Any:
                         propainter_python = gr.Textbox(
                             label="ProPainter Python executable",
                             placeholder=(
-                                r"C:\Users\you\miniconda3\envs\propainter\python.exe "
+                                r"C:\Users\<your-username>\miniconda3\envs\propainter\python.exe "
                                 "(blank = UI Python)"
                             ),
                             info=(
@@ -697,8 +708,16 @@ def build_app() -> Any:
     return app
 
 
+def launch_app(**launch_options: Any) -> None:
+    """Launch the app with the presentation options Gradio 6 expects at launch time."""
+    app = build_app()
+    import gradio as gr  # type: ignore[import-not-found]
+
+    app.launch(css=APP_CSS, theme=gr.themes.Soft(), **launch_options)
+
+
 def main() -> None:
-    build_app().launch(show_error=True)
+    launch_app(show_error=True)
 
 
 if __name__ == "__main__":
