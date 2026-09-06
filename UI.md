@@ -41,7 +41,7 @@ ProPainter directory:
 C:\Work\ProPainter
 
 ProPainter Python executable:
-C:\Users\you\miniconda3\envs\propainter\python.exe
+C:\Users\<your-username>\miniconda3\envs\propainter\python.exe
 ```
 
 Leave **ProPainter Python executable** blank to use the same Python interpreter as the UI.

@@ -1,3 +1,5 @@
+import inspect
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -6,7 +8,9 @@ import pytest
 from watermark_remover.models import Region
 from watermark_remover.progress import PipelineProgress
 from watermark_remover.ui import (
+    APP_CSS,
     build_pipeline_config,
+    launch_app,
     process_video,
     region_from_annotation,
     region_from_points,
@@ -137,6 +141,7 @@ def test_process_video_delegates_progress_and_returns_artifacts(
     assert len(calls) == 1
     assert updates == [PipelineProgress(0.5, "processing", "Halfway")]
 
+
 class FakeUiError(Exception):
     """Stand-in for gradio's Error type, which the UI raises for bad input."""
 
@@ -183,3 +188,36 @@ def test_process_video_does_not_translate_pipeline_failures(
             tmp_path / "ProPainter",
             error_factory=FakeUiError,
         )
+
+
+def test_build_app_does_not_warn_about_moved_blocks_parameters():
+    pytest.importorskip("gradio")
+    pytest.importorskip("gradio_image_annotation")
+    from watermark_remover.ui import build_app
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        build_app()
+
+    messages = [str(w.message) for w in caught]
+    moved = [m for m in messages if "moved from the Blocks constructor" in m]
+    assert moved == []
+
+
+def test_launch_app_supplies_css_and_theme_at_launch(monkeypatch: pytest.MonkeyPatch):
+    gr = pytest.importorskip("gradio")
+    recorded: dict[str, object] = {}
+
+    class FakeApp:
+        def launch(self, **kwargs: object) -> None:
+            recorded.update(kwargs)
+
+    monkeypatch.setattr("watermark_remover.ui.build_app", lambda: FakeApp())
+    launch_app(show_error=True)
+
+    assert recorded["css"] == APP_CSS
+    assert recorded["theme"] is not None
+    assert recorded["show_error"] is True
+    # Guard against forwarding options real Gradio would reject.
+    accepted = inspect.signature(gr.Blocks.launch).parameters
+    assert set(recorded) <= set(accepted)

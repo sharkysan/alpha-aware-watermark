@@ -434,11 +434,7 @@ def build_app() -> Any:
             error_factory=gr.Error,
         )
 
-    with gr.Blocks(
-        title="Alpha-Aware Watermark",
-        css=APP_CSS,
-        theme=gr.themes.Soft(),
-    ) as app:
+    with gr.Blocks(title="Alpha-Aware Watermark") as app:
         gr.HTML(
             """
             <div class="hero-card">
@@ -510,7 +506,7 @@ def build_app() -> Any:
                         propainter_python = gr.Textbox(
                             label="ProPainter Python executable",
                             placeholder=(
-                                r"C:\Users\you\miniconda3\envs\propainter\python.exe "
+                                r"C:\Users\<your-username>\miniconda3\envs\propainter\python.exe "
                                 "(blank = UI Python)"
                             ),
                             info=(
@@ -675,8 +671,16 @@ def build_app() -> Any:
     return app
 
 
+def launch_app(**launch_options: Any) -> None:
+    """Launch the app with the presentation options Gradio 6 expects at launch time."""
+    app = build_app()
+    import gradio as gr  # type: ignore[import-not-found]
+
+    app.launch(css=APP_CSS, theme=gr.themes.Soft(), **launch_options)
+
+
 def main() -> None:
-    build_app().launch(show_error=True)
+    launch_app(show_error=True)
 
 
 if __name__ == "__main__":
