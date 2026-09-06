@@ -5,3 +5,4 @@ htmlcov/
 .venv/
 *.pyc
 /alpha_aware_watermark_remover.egg-info
+/.idea
