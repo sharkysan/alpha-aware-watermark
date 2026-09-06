@@ -136,3 +136,50 @@ def test_process_video_delegates_progress_and_returns_artifacts(
     assert status == "Processing completed successfully."
     assert len(calls) == 1
     assert updates == [PipelineProgress(0.5, "processing", "Halfway")]
+
+class FakeUiError(Exception):
+    """Stand-in for gradio's Error type, which the UI raises for bad input."""
+
+
+def test_process_video_translates_input_errors_via_error_factory(tmp_path: Path):
+    missing_python = tmp_path / "missing-python.exe"
+    with pytest.raises(FakeUiError) as excinfo:
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            propainter_python=missing_python,
+            error_factory=FakeUiError,
+        )
+    message = str(excinfo.value)
+    assert "propainter_python" in message
+    assert str(missing_python) in message
+    assert "preflight" in message.lower()
+
+
+def test_process_video_defaults_to_value_error_for_invalid_inputs(tmp_path: Path):
+    with pytest.raises(ValueError, match="propainter_python"):
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            propainter_python=tmp_path / "missing-python.exe",
+        )
+
+
+def test_process_video_does_not_translate_pipeline_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class ExplodingPipeline:
+        def __init__(self, config, progress_reporter=None):
+            self.config = config
+
+        def run(self):
+            raise ValueError("pipeline exploded")
+
+    monkeypatch.setattr("watermark_remover.ui.WatermarkRemovalPipeline", ExplodingPipeline)
+    with pytest.raises(ValueError, match="pipeline exploded"):
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            error_factory=FakeUiError,
+        )
