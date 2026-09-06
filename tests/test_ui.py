@@ -26,6 +26,7 @@ def test_build_pipeline_config_uses_input_directory_by_default(tmp_path: Path):
     assert config.report_path == tmp_path / "clip_alpha_quality.csv"
     assert config.region is None
     assert config.mask_dir is None
+    assert config.roi_padding == 32
 
 
 def test_build_pipeline_config_maps_custom_region_and_mask(tmp_path: Path):
@@ -45,6 +46,7 @@ def test_build_pipeline_config_maps_custom_region_and_mask(tmp_path: Path):
         chunk_size=48,
         motion_compensation=False,
         fp16=True,
+        roi_padding=40,
     )
     assert config.output_path == output_dir / "clip_alpha_clean.mp4"
     assert config.report_path == output_dir / "clip_alpha_quality.csv"
@@ -54,6 +56,7 @@ def test_build_pipeline_config_maps_custom_region_and_mask(tmp_path: Path):
     assert config.chunk_size == 48
     assert config.motion_compensation is False
     assert config.fp16 is True
+    assert config.roi_padding == 40
 
 
 def test_build_pipeline_config_reuses_model_validation(tmp_path: Path):
@@ -133,17 +136,29 @@ def test_process_video_delegates_progress_and_returns_artifacts(
         tmp_path / "ProPainter",
         output_dir=output_dir,
         progress_reporter=updates.append,
+        roi_padding=40,
     )
     assert output_dir.is_dir()
     assert Path(video) == output_dir / "clip_alpha_clean.mp4"
     assert Path(report) == output_dir / "clip_alpha_quality.csv"
     assert status == "Processing completed successfully."
     assert len(calls) == 1
+    assert calls[0].roi_padding == 40
     assert updates == [PipelineProgress(0.5, "processing", "Halfway")]
 
 
 class FakeUiError(Exception):
     """Stand-in for gradio's Error type, which the UI raises for bad input."""
+
+
+def test_process_video_translates_invalid_roi_padding(tmp_path: Path):
+    with pytest.raises(FakeUiError, match="roi_padding"):
+        process_video(
+            tmp_path / "clip.mp4",
+            tmp_path / "ProPainter",
+            roi_padding=-1,
+            error_factory=FakeUiError,
+        )
 
 
 def test_process_video_translates_input_errors_via_error_factory(tmp_path: Path):

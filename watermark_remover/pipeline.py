@@ -23,8 +23,9 @@ from .motion import aligned_temporal_median
 from .ports import CommandRunner
 from .progress import PipelineProgress, ProgressReporter, ignore_progress
 from .reporting import write_quality_report
+from .roi import composite_roi_video, crop_sequences, find_mask_union_roi
 from .scenes import Scene, detect_scenes
-from .video import extract_frames, mux_original_audio, probe_video
+from .video import encode_frames, extract_frames, mux_original_audio, probe_video
 
 
 class WatermarkRemovalPipeline:
@@ -50,7 +51,7 @@ class WatermarkRemovalPipeline:
         if not self.config.input_path.exists():
             raise FileNotFoundError(self.config.input_path)
 
-        width, height, _, frame_count = probe_video(self.config.input_path)
+        width, height, fps, frame_count = probe_video(self.config.input_path)
         self._report(0.05, "preflight", "Checking disk space and processing prerequisites")
         self._preflight_disk_space(width, height, frame_count)
         mask_provider = self._mask_provider or self._build_mask_provider(width, height)
@@ -150,13 +151,65 @@ class WatermarkRemovalPipeline:
                         f"Processed {min(processed_frames, total_frames)}/{total_frames} frames",
                     )
 
-            self._report(0.80, "inpainting", "Running ProPainter residual inpainting")
-            generated_video = inpainter.inpaint(
-                analytic_dir,
+            roi = find_mask_union_roi(
                 residual_dir,
-                inpainted_dir,
+                width,
+                height,
+                padding=self.config.roi_padding,
             )
-            self._report(0.92, "muxing", "Restoring original audio and writing output video")
+            if roi is None:
+                self._report(
+                    0.80,
+                    "inpainting",
+                    "No residual pixels require ProPainter; encoding analytic result",
+                )
+                generated_video = encode_frames(
+                    analytic_dir,
+                    inpainted_dir / "analytic.mp4",
+                    fps,
+                    self.runner,
+                    pattern="%05d.png",
+                )
+            else:
+                roi_frames_dir = temp_dir / "roi_frames"
+                roi_masks_dir = temp_dir / "roi_masks"
+                composite_dir = temp_dir / "composited"
+                crop_sequences(
+                    analytic_dir,
+                    residual_dir,
+                    roi,
+                    roi_frames_dir,
+                    roi_masks_dir,
+                )
+                roi_fraction = (roi.width * roi.height) / max(1, width * height)
+                self._report(
+                    0.80,
+                    "inpainting",
+                    (
+                        "Running ProPainter on residual ROI "
+                        f"{roi.width}×{roi.height} ({roi_fraction:.1%} of full frame)"
+                    ),
+                )
+                roi_video = inpainter.inpaint(
+                    roi_frames_dir,
+                    roi_masks_dir,
+                    inpainted_dir,
+                )
+                self._report(0.89, "compositing", "Compositing inpainted ROI into full frames")
+                composite_roi_video(
+                    analytic_dir,
+                    roi_video,
+                    roi,
+                    composite_dir,
+                )
+                generated_video = encode_frames(
+                    composite_dir,
+                    inpainted_dir / "composited.mp4",
+                    fps,
+                    self.runner,
+                )
+
+            self._report(0.94, "muxing", "Restoring original audio and writing output video")
             mux_original_audio(
                 generated_video,
                 self.config.input_path,
